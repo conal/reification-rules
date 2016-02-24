@@ -1,8 +1,12 @@
-{-# LANGUAGE GADTs, KindSignatures #-}
+{-# LANGUAGE CPP, GADTs, KindSignatures #-}
 {-# OPTIONS_GHC -Wall #-}
 
+#define Testing
+
 -- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
--- {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
+#ifdef Testing
+{-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
+#endif
 
 ----------------------------------------------------------------------
 -- |
@@ -13,20 +17,21 @@
 -- Maintainer  :  conal@conal.net
 -- Stability   :  experimental
 -- 
--- Higher-order syntax interface to lambda expressions
---
--- "Using Circular Programs for Higher-Order Syntax" by Emil Axelsson and Koen Claessen
+-- Higher-order syntax interface to lambda expressions. Based on "Using Circular
+-- Programs for Higher-Order Syntax" by Emil Axelsson and Koen Claessen
 -- <http://www.cse.chalmers.se/~emax/documents/axelsson2013using.pdf>.
 ----------------------------------------------------------------------
 
-module ReificationRules.HOS where
+module ReificationRules.HOS (EP,appP,lamP,reifyP,evalP,constP) where
 
 -- TODO: explicit exports
 
 import Data.Map
 
-import LambdaCCC.Lambda (E(..),V(..),Pat(..),reifyE,evalE)
-import LambdaCCC.Prim (Prim(..))
+import LambdaCCC.Lambda (E(..),V(..),Pat(..),reifyE,evalE,HasOpInfo)
+import LambdaCCC.Prim (Prim(..),EvalableP,PrimBasics)
+import LambdaCCC.Misc (Eq1')
+import Circat.ShowUtils (Show')
 
 type Name = String
 
@@ -53,8 +58,19 @@ lam nm f = (Lam (VarPat (V nm')) body, mf)
 -- insertLookupWithKey ::
 --   Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a, Map k a)
 
-constE :: p a -> E' p a
-constE p = (ConstE p, bot)
+constE' :: p a -> E' p a
+constE' p = (ConstE p, bot)
+
+reifyE' :: a -> E' p a
+reifyE' e = (reifyE e,bot)
+
+evalE' :: (HasOpInfo p, Show' p, EvalableP p, Eq1' p, PrimBasics p)
+       => E' p a -> a
+evalE' (e,_) = evalE e
+
+{--------------------------------------------------------------------
+    Specializations to Prim
+--------------------------------------------------------------------}
 
 type EP a = E' Prim a
 
@@ -65,10 +81,13 @@ lamP :: Name -> (EP a -> EP b) -> EP (a -> b)
 lamP = lam
 
 reifyP :: a -> EP a
-reifyP e = (reifyE e,bot)
+reifyP = reifyE'
 
 evalP :: EP a -> a
-evalP (e,_) = evalE e
+evalP = evalE'
+
+constP :: Prim a -> EP a
+constP = constE'
 
 {--------------------------------------------------------------------
     Tests
@@ -81,19 +100,20 @@ type Ternop a = a -> Binop a
 twice :: Unop (Unop a)
 twice f = f . f
 
-app2 :: E' p (a1 -> a -> b) -> E' p a1 -> E' p a -> E' p b
-app2 f a b = app (app f a) b
+app1 :: p (a -> b) -> E' p a -> E' p b
+app1 p = app (constE' p)
+
+app2 :: p (a -> b -> c) -> E' p a -> E' p b -> E' p c
+app2 f a b = app (app1 f a) b
 
 notOf :: Unop (EP Bool)
-notOf = app (constE NotP)
+notOf = app1 NotP
 
 orOf :: Binop (EP Bool)
-orOf = app2 (constE OrP)
-
--- orOf a b = app (app (constE OrP) a) b
+orOf = app2 OrP
 
 t1 :: EP (Bool -> Bool)
-t1 = constE NotP
+t1 = constE' NotP
 -- (not,fromList [])
 
 t2 :: EP (Unop Bool)
