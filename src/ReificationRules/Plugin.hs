@@ -24,11 +24,12 @@ import GhcPlugins
 import DynamicLoading
 import TypeRep
 
--- import Control.Applicative (liftA2)
-
 import HERMIT.Name (newIdH)
 
-import HERMIT.Extras hiding (ReExpr,ReType,apps)
+import HERMIT.Extras (subst,exprType')
+
+import LambdaCCC.Misc (Unop,Binop)
+
 
 -- Reification operations
 data LamOps = LamOps { mkE     :: Unop  Type
@@ -51,7 +52,6 @@ reify (LamOps {..}) = \ case
 {--------------------------------------------------------------------
     Plugin installation
 --------------------------------------------------------------------}
-
 
 #if 0
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
@@ -77,7 +77,7 @@ mkLamOps = do
   reifyV <- findLamId "reifyEP"
   evalV  <- findLamId "evalEP"
   let apps v tys vals = mkCoreApps (Var v) (map Type tys ++ vals)
-      mkE ty = TyConApp eTc [ty]
+      mkE    ty = TyConApp eTc [ty]
       mkReify e = apps reifyV [exprType e] [e]
       mkEval  e = apps  evalV [exprType e] [e]
       mkApp u v = apps   appV [ran,dom] [u,v]  -- note ran, dom
@@ -87,23 +87,6 @@ mkLamOps = do
        where
          (dom,ran) = splitFunTy (exprType' f)
   return (LamOps { .. })
-
-{--------------------------------------------------------------------
-    Build LamOps
---------------------------------------------------------------------}
-
--- mkLamOps :: CoreM LamOps
--- mkLamOps =
---   do 
-
-#if 0
-
--- t --> EP t
-epTy :: ReType
-epTy ty = do tc <- lookupTyCon (lamName epS)
-             return (TyConApp tc [ty])
-
-#endif
 
 {--------------------------------------------------------------------
     Misc
