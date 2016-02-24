@@ -35,25 +35,39 @@ import LambdaCCC.Misc (Unop,Binop)
 --------------------------------------------------------------------}
 
 -- Reification operations
-data LamOps = LamOps { mkE     :: Unop Type
-                     , mkReify :: Unop CoreExpr
-                     , mkEval  :: Unop CoreExpr
-                     , mkApp   :: Binop CoreExpr
-                     , mkLam   :: String -> Unop CoreExpr
+data LamOps = LamOps { eTyCon  :: TyCon
+                     , unpackV :: Id
+                     , reifyV  :: Id
+                     , evalV   :: Id
+                     , appV    :: Id
+                     , lamV    :: Id
                      }
 
-reify :: LamOps -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
-reify (LamOps {..}) _inScope = \ case 
-  App u v -> Just $ mkApp (mkReify u) (mkReify v)
-  Lam x e -> Just (mkLam (uqVarName y) (mkReify (subst [(x,mkEval (Var y))] e)))
+reify :: LamOps -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
+reify (LamOps {..}) _dflags _inScope = \ case 
+  App u v | not (isTyCoArg v)
+          , Just (dom,ran) <- splitFunTy_maybe (exprType' u) ->
+    Just $ varApps appV [ran,dom] (mkReify <$> [u,v])  -- note ran,dom
+  Lam x e | not (isTyVar x) ->
+    Just $ varApps lamV [varType x, exprType' e]
+             [ unpackStr (uqVarName y)
+             , mkReify (subst [(x,varApps evalV [xty] [Var y])] e) ]
     where
-      y = setVarType x (mkE (varType x)) -- *
-  e -> -- pprTrace "reify" (text "Unhandled" <+> ppr e) $
-      return e
+      xty           = varType x
+      y             = setVarType x (mkE xty) -- *
+      unpackStr str = Var unpackV `App` Lit (mkMachString str)
+  _ -> -- pprTrace "reify" (text "Unhandled" <+> ppr e) $
+       Nothing
+ where
+   mkE ty = TyConApp eTyCon [ty]
+   mkReify arg = varApps reifyV [exprType' arg] [arg]
 
--- * Is it okay for me to reuse x's unique here? If not, let uniqAway x and then
--- setVarType. I can also avoid the issue by forming reify . f . eval, which
--- requires making *un-applied* reify & eval.
+varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
+varApps v tys es = mkCoreApps (Var v) (map Type tys ++ es)
+
+-- * Is it okay for me to reuse x's unique here? If not, use uniqAway x and then
+-- setVarType. I can also avoid the issue by forming reify . f . eval. I could
+-- include the Id for (.) in LamOps. Or bundle reify <~ eval as reifyFun.
 
 -- forall (f :: a -> b).  reify f = lam (\y. reify (f (eval y)))
 
@@ -65,41 +79,32 @@ reify (LamOps {..}) _inScope = \ case
   | BuiltinRule {
         ru_name  :: RuleName,   -- ^ As above
         ru_fn    :: Name,       -- ^ As above
-        ru_nargs :: Int,        -- ^ Number of arguments that 'ru_try' consumes,
-                                -- if it fires, including type arguments
+        ru_nargs :: Int,        -- ^ Number of arguments that 'ru_try' consumes
         ru_try   :: RuleFun
-                -- ^ This function does the rewrite.  It given too many
-                -- arguments, it simply discards them; the returned 'CoreExpr'
-                -- is just the rewrite of 'ru_fn' applied to the first 'ru_nargs' args
     }
-                -- See Note [Extra args in rule matching] in Rules.lhs
 
 type RuleFun = DynFlags -> InScopeEnv -> Id -> [CoreExpr] -> Maybe CoreExpr
 type InScopeEnv = (InScopeSet, IdUnfoldingFun)
 #endif
 
-reifyRule :: CoreM CoreRule
-reifyRule = reRule <$> mkLamOps
+mkReifyRule :: CoreM CoreRule
+mkReifyRule = reRule <$> mkLamOps
  where
    reRule :: LamOps -> CoreRule
    reRule ops =
-     BuiltinRule { ru_name = fsLit "reify"
-                 , ru_fn = error "reifyRule ru_fn"
+     BuiltinRule { ru_name  = fsLit "reify"
+                 , ru_fn    = varName (reifyV ops)
                  , ru_nargs = 1
-                 , ru_try = \ _dflags inScope _fn [arg] -> reify ops inScope arg
+                 , ru_try   = \ dflags inScope _fn [arg] ->
+                                 reify ops dflags inScope arg
                  }
 
-
--- Hm. RuleFun does not involve CoreM. How to generate new identifiers?
--- How does eta-expansion work?
-
-#if 0
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 install _opts todos = do
   reinitializeGlobals
-  ...
+  rr <- mkReifyRule
+  let reifyPass = pure . on_mg_rules (rr :)
   return $ CoreDoPluginPass "Reify" reifyPass : todos
-#endif
 
 mkLamOps :: CoreM LamOps
 mkLamOps = do
@@ -111,23 +116,12 @@ mkLamOps = do
       lookupLam = lookupRdr (mkModuleName "LambdaCCC.Lambda")
       findLamTc = lookupLam lookupTyCon
       findLamId = lookupLam lookupId    
-  eTc     <- findLamTc "EP"
-  appV    <- findLamId "appP"
-  lamV    <- findLamId "lamP"
+  eTyCon  <- findLamTc "EP"
+  unpackV <- lookupRdr (mkModuleName "GHC.CString") lookupId "unpackCString#"
   reifyV  <- findLamId "reifyEP"
   evalV   <- findLamId "evalEP"
-  unpackV <- lookupRdr (mkModuleName "GHC.CString") lookupId "unpackCString#"
-  let unpackStr str = Var unpackV `App` Lit (mkMachString str)
-  let apps v tys vals = mkCoreApps (Var v) (map Type tys ++ vals)
-      mkE    ty = TyConApp eTc [ty]
-      mkReify e = apps reifyV [exprType e] [e]
-      mkEval  e = apps  evalV [exprType e] [e] -- WRONG! unE
-      mkApp u v = apps   appV [ran,dom] [u,v]  -- note ran, dom. WRONG! unE
-       where
-         (dom,ran) = splitFunTy (exprType' u)
-      mkLam str f = apps lamV [ran,dom] [unpackStr str,f] -- *
-       where
-         (dom,ran) = splitFunTy (exprType' f)
+  appV    <- findLamId "appP"
+  lamV    <- findLamId "lamP"
   return (LamOps { .. })
 
 -- * I'm assuming changes to lamP: note ran, dom. check.
@@ -141,9 +135,5 @@ mkLamOps = do
     Misc
 --------------------------------------------------------------------}
 
--- type Rewrite a = a -> CoreM a
-
--- type ReExpr = Rewrite CoreExpr
--- type ReType = Rewrite Type
-
--- type ReExpr2 = CoreExpr -> ReExpr
+on_mg_rules :: Unop [CoreRule] -> Unop ModGuts
+on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
