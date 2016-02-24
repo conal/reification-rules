@@ -30,8 +30,11 @@ import Data.Map
 
 import LambdaCCC.Lambda (E(..),V(..),Pat(..),reifyE,evalE,HasOpInfo)
 import LambdaCCC.Prim (Prim(..),EvalableP,PrimBasics)
-import LambdaCCC.Misc (Eq1')
+import LambdaCCC.Misc (Eq1',Unop,Binop)
+
 import Circat.ShowUtils (Show')
+
+-- TODO: Drastically trim LambdaCCC.Lambda. See NewLambda for a start.
 
 type Name = String
 
@@ -93,8 +96,6 @@ constP = constE'
     Tests
 --------------------------------------------------------------------}
 
-type Unop a = a -> a
-type Binop a = a -> Unop a
 type Ternop a = a -> Binop a
 
 twice :: Unop (Unop a)
