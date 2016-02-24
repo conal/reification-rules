@@ -1,27 +1,32 @@
-Name:                reification-rules
-Version:             0.0.0
-Cabal-Version:       >= 1.6
-Synopsis:            Core reification via rules
-Category:            reification
+Name:               reification-rules
+Version:            0.0.0
+Cabal-Version:      >= 1.6
+Synopsis:           Core reification via rules
+Category:           reification
 Description:
   Core reification via rules
-Author:              Conal Elliott
-Maintainer:          conal@conal.net
-Copyright:           (c) 2016 by Conal Elliott
-License:             BSD3
-License-File:        COPYING
-Stability:           experimental
-build-type:          Simple
+Author:             Conal Elliott
+Maintainer:         conal@conal.net
+Copyright:          (c) 2016 by Conal Elliott
+License:            BSD3
+License-File:       COPYING
+Stability:          experimental
+build-type:         Simple
 
 source-repository head
   type:     git
   location: git://github.com/conal/reification-rules.git
 
 Library
-  hs-Source-Dirs:      src
+  hs-Source-Dirs:   src
   Extensions:
-  Build-Depends:       base<5
+  Build-Depends:    base<5
+                  , ghc >= 7.10.3
+                  , kure >= 2.16.0
+                  , hermit >= 1.0.0.1
+                  , hermit-extras
 
-  Exposed-Modules:     
+  Exposed-Modules:
+                    ReificationRules.Plugin
   ghc-options:         -Wall
 
