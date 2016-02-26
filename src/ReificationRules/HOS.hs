@@ -1,7 +1,7 @@
-{-# LANGUAGE CPP, GADTs, KindSignatures #-}
+{-# LANGUAGE CPP, GADTs, KindSignatures, ExplicitForAll #-}
 {-# OPTIONS_GHC -Wall #-}
 
-#define Testing
+-- #define Testing
 
 -- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
 #ifdef Testing
@@ -28,15 +28,14 @@ module ReificationRules.HOS (EP,appP,lamP,reifyP,evalP,constP) where
 
 import Data.Map
 
-import LambdaCCC.Lambda (E(..),V(..),Pat(..),reifyE,evalE,HasOpInfo)
-import LambdaCCC.Prim (Prim(..),EvalableP,PrimBasics)
-import LambdaCCC.Misc (Eq1',Unop,Binop)
+#ifdef Testing
+import Circat.Misc (Unop,Binop,Ternop)
+#endif
 
-import Circat.ShowUtils (Show')
+import ReificationRules.Exp
+import ReificationRules.Prim
 
 -- TODO: Drastically trim LambdaCCC.Lambda. See NewLambda for a start.
-
-type Name = String
 
 type NameMap = Map Name Int
 
@@ -52,7 +51,7 @@ app :: E' p (a -> b) -> E' p a -> E' p b
 (f,mf) `app` (x,mx) = (f :^ x, mf `lub` mx)
 
 lam :: Name -> (E' p a -> E' p b) -> E' p (a -> b)
-lam nm f = (Lam (VarPat (V nm')) body, mf)
+lam nm f = (Lam (V nm') body, mf)
  where
    (body,mb) = f (Var (V nm'),bot)
    (mbN,mf)  = insertLookupWithKey (const (+)) nm 1 mb
@@ -67,36 +66,40 @@ constE' p = (ConstE p, bot)
 reifyE' :: a -> E' p a
 reifyE' e = (reifyE e,bot)
 
-evalE' :: (HasOpInfo p, Show' p, EvalableP p, Eq1' p, PrimBasics p)
-       => E' p a -> a
+evalE' :: E' p a -> a
 evalE' (e,_) = evalE e
 
 {--------------------------------------------------------------------
     Specializations to Prim
 --------------------------------------------------------------------}
 
+-- TODO: Eliminate these specialized definitions and pass Prim explicitly during
+-- reification.
+
 type EP a = E' Prim a
 
-appP :: EP (a -> b) -> EP a -> EP b
+appP :: forall a b. EP (a -> b) -> EP a -> EP b
 appP = app
 
-lamP :: Name -> (EP a -> EP b) -> EP (a -> b)
+lamP :: forall a b. Name -> (EP a -> EP b) -> EP (a -> b)
 lamP = lam
 
-reifyP :: a -> EP a
+reifyP :: forall a. a -> EP a
 reifyP = reifyE'
 
-evalP :: EP a -> a
+evalP :: forall a. EP a -> a
 evalP = evalE'
 
-constP :: Prim a -> EP a
+constP :: forall a. Prim a -> EP a
 constP = constE'
+
+-- The explicit 'forall's here help with reification.
+
+#ifdef Testing
 
 {--------------------------------------------------------------------
     Tests
 --------------------------------------------------------------------}
-
-type Ternop a = a -> Binop a
 
 twice :: Unop (Unop a)
 twice f = f . f
@@ -140,3 +143,5 @@ t6 = lam "x" $ \ x -> lam "x" $ \ y -> orOf x (notOf y)
 t7 :: EP (Ternop Bool)
 t7 = lam "x" $ \ x -> lam "x" $ \ y -> lam "x" $ \ z -> orOf x (notOf (orOf y z))
 -- (\ x2 -> \ x1 -> \ x -> x2 || not (x1 || x),fromList [("x",3)])
+
+#endif

@@ -21,12 +21,20 @@ Library
   hs-Source-Dirs:   src
   Extensions:
   Build-Depends:    base<5
+                  , containers
                   , ghc >= 7.10.3
                   , kure >= 2.16.0
                   , hermit >= 1.0.0.1
                   , hermit-extras
+                  , circat
+                  , lambda-ccc
 
   Exposed-Modules:
+                    ReificationRules.Misc
+                    ReificationRules.ShowUtils
+                    ReificationRules.Prim
+                    ReificationRules.Exp
+                    ReificationRules.HOS
                     ReificationRules.Plugin
-  ghc-options:         -Wall
+  ghc-options:      -Wall
 
