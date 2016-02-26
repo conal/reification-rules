@@ -38,34 +38,35 @@ data LamOps = LamOps { unpackV :: Id
                      , lamV    :: Id
                      }
 
-#define Tracing
-traceRewrite :: (Outputable a, Outputable b) =>
-                String -> Unop (a -> Maybe b)
+-- #define Tracing
+
+traceRewrite :: (Outputable a, Outputable b, Functor f) =>
+                String -> Unop (a -> f b)
 #ifdef Tracing
-traceRewrite str f a = fmap tr (f a)
+traceRewrite str f a = tr <$> f a
  where
    tr b = pprTrace str (ppr a <+> text "-->" <+> ppr b) b
 #else
-traceRewrite = id
+traceRewrite _ = id
 #endif
 
 reify :: LamOps -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
-reify (LamOps {..}) _dflags _inScope = traceRewrite "reify" $ \ case 
-  e | pprTrace "reify" (ppr e) False -> undefined
+reify (LamOps {..}) _dflags _inScope = traceRewrite "reify rule" $ \ case 
+  -- e | pprTrace "reify" (ppr e) False -> undefined
   App u v | not (isTyCoArg v)
           , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
     Just $ varApps appV [dom,ran] (mkReify <$> [u,v])
   Lam x e | not (isTyVar x) ->
     Just $ varApps lamV [varType x, exprType e]
              [ unpackStr (uqVarName y) -- later, uqVarName & HOAS
-             , mkReify (subst [(x,varApps evalV [xty] [Var y])] e) ]
+             , Lam y (mkReify (subst1 x (varApps evalV [xty] [Var y]) e)) ]
     where
       xty           = varType x
       y             = setVarType x (exprType (mkReify (Var x)))
                       -- setVarType x (mkE xty) -- *
       unpackStr str = Var unpackV `App` Lit (mkMachString str)
-  _ -> -- pprTrace "reify" (text "Unhandled" <+> ppr e) $
-       Nothing
+  _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
+        Nothing
  where
    mkReify arg = varApps reifyV [exprType arg] [arg]
 
@@ -142,3 +143,6 @@ subst :: [(Id,CoreExpr)] -> Unop CoreExpr
 subst ps = substExpr (error "subst: no SDoc") (foldr add emptySubst ps)
  where
    add (v,new) sub = extendIdSubst sub v new
+
+subst1 :: Id -> CoreExpr -> Unop CoreExpr
+subst1 v e = subst [(v,e)]
