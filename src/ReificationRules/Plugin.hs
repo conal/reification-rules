@@ -3,6 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards     #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE ViewPatterns      #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
@@ -30,6 +31,8 @@ import Data.Maybe (fromMaybe)
 import GhcPlugins
 import DynamicLoading
 import Kind (isLiftedTypeKind)
+import Type (coreView)
+import TcType (isIntegerTy)
 
 {--------------------------------------------------------------------
     Reification
@@ -114,8 +117,33 @@ varApps v tys es = mkApps (Var v) (map Type tys ++ es)
 reifiableKind :: Kind -> Bool
 reifiableKind = isLiftedTypeKind
 
+-- reifiableType :: Type -> Bool
+-- reifiableType ty = reifiableKind (typeKind ty)
+
+-- Types we know how to handle
 reifiableType :: Type -> Bool
-reifiableType = reifiableKind . typeKind
+reifiableType (coreView -> Just ty) = reifiableType ty
+reifiableType (splitFunTy_maybe -> Just (dom,ran)) = reifiableType dom && reifiableType ran
+reifiableType ty = not (or (($ ty) <$> bads))
+ where
+   bads = [ isForAllTy
+          , not . reifiableKind . typeKind
+          , isPredTy
+          , badTyConApp
+          ]
+
+badTyConApp :: Type -> Bool
+-- badTyConApp ty | pprTrace "badTyConApp try" (ppr ty) False = undefined
+badTyConApp (coreView -> Just ty)            = badTyConApp ty
+badTyConApp (tyConAppTyCon_maybe -> Just tc) = badTyCon tc
+badTyConApp _                                = False
+
+badTyCon :: TyCon -> Bool
+-- badTyCon tc | pprTrace "badTyCon try" (ppr tc <+> text (qualifiedName (tyConName tc))) False = undefined
+badTyCon tc = qualifiedName (tyConName tc) `elem`
+  [ "GHC.Integer.Type", "GHC.Types.[]", "GHC.Types.IO", "ReificationRules.HOS.EP" ]
+
+-- ReificationRules.Exp.E
 
 reifiableExpr :: CoreExpr -> Bool
 reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
@@ -195,6 +223,11 @@ uniqVarName v = uqVarName v ++ "_" ++ show (varUnique v)
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
 
+-- Swiped from HERMIT.GHC
+-- | Get the fully qualified name from a 'Name'.
+qualifiedName :: Name -> String
+qualifiedName nm = modStr ++ getOccString nm
+    where modStr = maybe "" (\m -> moduleNameString (moduleName m) ++ ".") (nameModule_maybe nm)
 
 -- | Substitute new subexpressions for variables in an expression
 subst :: [(Id,CoreExpr)] -> Unop CoreExpr
