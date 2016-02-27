@@ -67,11 +67,11 @@ traceRewrite _ = id
 #endif
 
 reify :: LamOps -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
-reify (LamOps {..}) _dflags _inScope = go
+reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
  where
    go :: CoreExpr -> Maybe CoreExpr
-   go = traceRewrite "reify go" $ \ case 
-     e | pprTrace "reify:" (ppr e) False -> undefined
+   go = \ case 
+     e | pprTrace "reify go:" (ppr e) False -> undefined
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
        varApps appV [dom,ran] <$> mapM tryReify [u,v]
@@ -130,7 +130,13 @@ reifiableType ty = not (or (($ ty) <$> bads))
           , not . reifiableKind . typeKind
           , isPredTy
           , badTyConApp
+          , badTyConArg
           ]
+
+badTyConArg :: Type -> Bool
+badTyConArg (coreView -> Just ty)             = badTyConArg ty
+badTyConArg (tyConAppArgs_maybe -> Just args) = not (all reifiableType args)
+badTyConArg _                                 = False
 
 badTyConApp :: Type -> Bool
 -- badTyConApp ty | pprTrace "badTyConApp try" (ppr ty) False = undefined
@@ -141,7 +147,11 @@ badTyConApp _                                = False
 badTyCon :: TyCon -> Bool
 -- badTyCon tc | pprTrace "badTyCon try" (ppr tc <+> text (qualifiedName (tyConName tc))) False = undefined
 badTyCon tc = qualifiedName (tyConName tc) `elem`
-  [ "GHC.Integer.Type", "GHC.Types.[]", "GHC.Types.IO", "ReificationRules.HOS.EP" ]
+  [ "GHC.Integer.Type"
+  , "GHC.Types.[]"
+  , "GHC.Types.IO"
+  , "ReificationRules.Exp.E"
+  ]
 
 -- ReificationRules.Exp.E
 
