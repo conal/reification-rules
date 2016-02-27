@@ -84,26 +84,30 @@ evalE' (e,_) = evalE e
 -- TODO: Eliminate these specialized definitions and pass Prim explicitly during
 -- reification.
 
-newtype EP a = EP { unEP :: E' Prim a }
+type EP a = E' Prim a
 
 appP :: forall a b. EP (a -> b) -> EP a -> EP b
-appP (EP u) (EP v) = EP (app u v)
+appP = app
 {-# NOINLINE appP #-}
 
+-- lamP :: forall a b. Name -> (EP a -> EP b) -> EP (a -> b)
+-- lamP = lam
+-- {-# NOINLINE lamP #-}
+
 lamP :: forall a b. Addr# -> (EP a -> EP b) -> EP (a -> b)
-lamP addr f  = EP (lam (unpackCString# addr) (unEP . f . EP))
+lamP addr = lam (unpackCString# addr)
 {-# NOINLINE lamP #-}
 
 reifyP :: forall a. a -> EP a
-reifyP = EP . reifyE'
+reifyP = reifyE'
 {-# NOINLINE reifyP #-}
 
 evalP :: forall a. EP a -> a
-evalP = evalE' . unEP
+evalP = evalE'
 {-# NOINLINE evalP #-}
 
 constP :: forall a. Prim a -> EP a
-constP = EP . constE'
+constP = constE'
 {-# NOINLINE constP #-}
 
 -- The explicit 'forall's here help with reification.
