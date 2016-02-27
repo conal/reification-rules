@@ -14,13 +14,15 @@ GhcFlags += -ddump-simpl
 
 GhcFlags += -dsuppress-idinfo
 GhcFlags += -dsuppress-module-prefixes
-# GhcFlags += -dsuppress-type-signatures
 GhcFlags += -dsuppress-uniques
 
-GhcFlags += -ddump-rule-rewrites
-GhcFlags += -ddump-rule-firings
+# GhcFlags += -dsuppress-type-signatures
+# GhcFlags += -dsuppress-type-applications
 
-GhcFlags += -dverbose-core2core
+GhcFlags += -ddump-rule-rewrites
+# GhcFlags += -ddump-rule-firings
+
+# GhcFlags += -dverbose-core2core
 
 Tests: ../dist Tests.hs Makefile
 	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) Tests 
