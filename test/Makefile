@@ -1,13 +1,31 @@
+ghc = ~/bin/new-ghc/ghc
+
 default: Tests
 
 check-ghc:
-	which ghc
+	ghc --version
 
 go: Tests
 	./Tests
 
+GhcFlags += -dcore-lint
+GhcFlags += -fforce-recomp
+GhcFlags += -ddump-simpl
+
+GhcFlags += -dsuppress-idinfo
+GhcFlags += -dsuppress-module-prefixes
+# GhcFlags += -dsuppress-type-signatures
+GhcFlags += -dsuppress-uniques
+
+GhcFlags += -ddump-rule-rewrites
+GhcFlags += -ddump-rule-firings
+
+GhcFlags += -dverbose-core2core
+
 Tests: ../dist Tests.hs Makefile
-	ghc -O -fforce-recomp -fplugin=ReificationRules.Plugin Tests 
+	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) Tests 
+
+# -ddump-rule-rewrites
 
 shaped:
 	cd ../../shaped-types ; make
@@ -15,31 +33,7 @@ shaped:
 compile:
 	cd .. ; make
 
-lam:
-	cd ../../lambda-ccc ; make
-	make compile
-
 circat:
 	cd ../../circat ; make
-	make mono
+	make compile
 
-extras:
-	cd ../../hermit-extras ; make
-	make mono
-
-mono:
-	cd ../../monomorph ; make
-	make lam
-
-unregister-all:
-	@echo "Unregistering:"
-	@ghc-pkg unregister lambda-ccc    --force || true
-	@ghc-pkg unregister monomorph     --force || true
-	@ghc-pkg unregister hermit-extras --force || true
-	@ghc-pkg unregister circat        --force || true
-
-recompile-all: unregister-all
-	cd ../../circat	       ; cabal clean && cabal install
-	cd ../../hermit-extras ; cabal clean && cabal install
-	cd ../../monomorph     ; cabal clean && cabal install
-	cd ..		       ; cabal clean && cabal install

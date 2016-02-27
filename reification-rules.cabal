@@ -23,18 +23,26 @@ Library
   Build-Depends:    base<5
                   , containers
                   , ghc >= 7.10.3
-                  , kure >= 2.16.0
-                  , hermit >= 1.0.0.1
-                  , hermit-extras
+                  , ghc-prim >= 0.5.0.0
+                  , constraints
+                  , transformers >= 0.4
+                  , ty >= 0.1.5
                   , circat
-                  , lambda-ccc
+
+--                   , kure >= 2.16.0
+--                   , hermit >= 1.0.0.1
+--                   , hermit-extras
+--                   , lambda-ccc
 
   Exposed-Modules:
                     ReificationRules.Misc
                     ReificationRules.ShowUtils
                     ReificationRules.Prim
                     ReificationRules.Exp
+                    ReificationRules.FOS
                     ReificationRules.HOS
                     ReificationRules.Plugin
   ghc-options:      -Wall
 
+
+  -- TODO: remove FOS or HOS

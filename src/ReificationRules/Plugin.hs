@@ -23,20 +23,31 @@
 
 module ReificationRules.Plugin (plugin) where
 
+import Control.Monad (guard)
+
 import GhcPlugins
 import DynamicLoading
+import Kind (isLiftedTypeKind)
 
 {--------------------------------------------------------------------
     Reification
 --------------------------------------------------------------------}
 
+-- #define UseFos
+
 -- Reification operations
 data LamOps = LamOps { unpackV :: Id
-                     , reifyV  :: Id
-                     , evalV   :: Id
+#ifdef UseFos
+                     , varV    :: Id
+#endif
                      , appV    :: Id
                      , lamV    :: Id
+                     , reifyV  :: Id
+                     , evalV   :: Id
                      }
+
+-- TODO: drop reifyV, since it's in the rule
+-- TODO: drop unpackV, since I'll probably replace String by Addr# for names.
 
 -- #define Tracing
 
@@ -52,30 +63,56 @@ traceRewrite _ = id
 
 reify :: LamOps -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
 reify (LamOps {..}) _dflags _inScope = traceRewrite "reify rule" $ \ case 
-  -- e | pprTrace "reify" (ppr e) False -> undefined
+  e | pprTrace "reify: try" (ppr e) False -> undefined
   App u v | not (isTyCoArg v)
           , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
-    Just $ varApps appV [dom,ran] (mkReify <$> [u,v])
+    varApps appV [dom,ran] <$> mapM tryReify [u,v]
+#ifdef UseFos
   Lam x e | not (isTyVar x) ->
     Just $ varApps lamV [varType x, exprType e]
-             [ unpackStr (uqVarName y) -- later, uqVarName & HOAS
+             [ ystr ,
+               mkReify (subst1 x (varApps evalV [xty] [varApps varV [xty] [ystr]]) e) ]
+    where
+      xty  = varType x
+      ystr = stringExpr (uniqVarName x)
+#else
+  Lam x e | not (isTyVar x) ->
+    Just $ varApps lamV [xty, exprType e]
+             [ stringExpr (uqVarName y)
              , Lam y (mkReify (subst1 x (varApps evalV [xty] [Var y]) e)) ]
     where
       xty           = varType x
       y             = setVarType x (exprType (mkReify (Var x)))
                       -- setVarType x (mkE xty) -- *
-      unpackStr str = Var unpackV `App` Lit (mkMachString str)
+#endif
   _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
         Nothing
  where
-   mkReify arg = varApps reifyV [exprType arg] [arg]
+   stringExpr :: String -> CoreExpr
+   stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
+
+   mkReify e = varApps reifyV [exprType e] [e]
+   tryReify :: CoreExpr -> Maybe CoreExpr
+   -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
+   tryReify e = guard (reifiableExpr e) >> Just (mkReify e)
+
+-- TODO: Replace unpackV by unpackStr in LamOps.
 
 -- * Is it safe to reuse x's unique here? If not, use uniqAway x and then
 -- setVarType. I can also avoid the issue by forming reify . f . eval. I could
 -- include the Id for (.) in LamOps. Or bundle reify <~ eval as reifyFun.
 
 varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
-varApps v tys es = mkCoreApps (Var v) (map Type tys ++ es)
+varApps v tys es = mkApps (Var v) (map Type tys ++ es)
+
+reifiableKind :: Kind -> Bool
+reifiableKind = isLiftedTypeKind
+
+reifiableType :: Type -> Bool
+reifiableType = reifiableKind . typeKind
+
+reifiableExpr :: CoreExpr -> Bool
+reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
 
 {--------------------------------------------------------------------
     Plugin installation
@@ -117,13 +154,22 @@ mkLamOps = do
        where
          err = "reify installation: couldn't find "
                ++ str ++ " in " ++ moduleNameString modu
-      lookupHos = lookupRdr (mkModuleName "ReificationRules.HOS")
+      lookupHos = lookupRdr (mkModuleName
+#ifdef UseFos
+                             "ReificationRules.FOS"
+#else
+                             "ReificationRules.HOS"
+#endif
+                            )
       findHosId = lookupHos lookupId
   unpackV <- lookupRdr (mkModuleName "GHC.CString") lookupId "unpackCString#"
-  reifyV  <- findHosId "reifyP"
-  evalV   <- findHosId "evalP"
+#ifdef UseFos
+  varV    <- findHosId "varP"
+#endif
   appV    <- findHosId "appP"
   lamV    <- findHosId "lamP"
+  reifyV  <- findHosId "reifyP"
+  evalV   <- findHosId "evalP"
   return (LamOps { .. })
 
 {--------------------------------------------------------------------
@@ -135,8 +181,14 @@ on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
 
 type Unop a = a -> a
 
+#ifdef UseFos
+uniqVarName :: Var -> String
+uniqVarName v = uqVarName v ++ "_" ++ show (varUnique v)
+#endif
+
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
+
 
 -- | Substitute new subexpressions for variables in an expression
 subst :: [(Id,CoreExpr)] -> Unop CoreExpr

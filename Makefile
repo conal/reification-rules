@@ -1,7 +1,10 @@
 # include ../my-cabal-make.inc
 
 install:
-	time cabal install -j1 --disable-documentation --force-reinstalls
+	cabal install -j1 --disable-documentation --force-reinstalls
+
+clean:
+	cabal clean
 
 fresh:
 	cabal clean && make install

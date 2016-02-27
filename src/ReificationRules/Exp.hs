@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP            #-}
 {-# LANGUAGE GADTs          #-}
 {-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE PatternGuards  #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
