@@ -20,6 +20,8 @@ module ReificationRules.BuildDictionary where
 
 -- TODO: explicit exports
 
+import Control.Monad (guard)
+import Data.Char (isSpace)
 import System.IO.Unsafe (unsafePerformIO)
 
 import GhcPlugins
@@ -43,23 +45,10 @@ import DsBinds
 import           TcSimplify
 import           TcRnTypes
 import ErrUtils (pprErrMsgBagWithLoc)
+import Encoding (zEncodeString)
+import Unique (mkUniqueGrimily)
 
 import HERMIT.GHC.Typechecker (initTcFromModGuts)
-
-runTcM :: ModGuts -> TcM a -> CoreM a
-runTcM guts m = do
-    env <- getHscEnv
-    dflags <- getDynFlags
-    -- What is the effect of HsSrcFile (should we be using something else?)
-    -- What should the boolean flag be set to?
-    (msgs, mr) <- liftIO $ initTcFromModGuts env guts HsSrcFile False m
-    let showMsgs (warns, errs) = showSDoc dflags $ vcat
-                                                 $    text "Errors:" : pprErrMsgBagWithLoc errs
-                                                   ++ text "Warnings:" : pprErrMsgBagWithLoc warns
-    maybe (fail $ showMsgs msgs) return mr
-
-runDsM :: ModGuts -> DsM a -> CoreM a
-runDsM guts = runTcM guts . initDsTc
 
 runTcMUnsafe :: HscEnv -> DynFlags -> ModGuts -> TcM a -> a
 runTcMUnsafe env dflags guts m = unsafePerformIO $ do
@@ -71,12 +60,15 @@ runTcMUnsafe env dflags guts m = unsafePerformIO $ do
                                                    ++ text "Warnings:" : pprErrMsgBagWithLoc warns
     maybe (fail $ showMsgs msgs) return mr
 
+-- TODO: Try initTcForLookup or initTcInteractive in place of initTcFromModGuts.
+-- If successful, drop dflags and guts arguments.
+
 runDsMUnsafe :: HscEnv -> DynFlags -> ModGuts -> DsM a -> a
 runDsMUnsafe env dflags guts = runTcMUnsafe env dflags guts . initDsTc
 
 -- | Build a dictionary for the given
-buildDictionary :: HscEnv -> DynFlags -> ModGuts -> Id -> (Id, [CoreBind])
-buildDictionary env dflags guts evar =
+buildDictionary' :: HscEnv -> DynFlags -> ModGuts -> Id -> (Id, [CoreBind])
+buildDictionary' env dflags guts evar =
     let (i, bs) = runTcMUnsafe env dflags guts $ do
 #if __GLASGOW_HASKELL__ > 710 
         loc <- getCtLocM (GivenOrigin UnkSkol) Nothing
@@ -95,11 +87,34 @@ buildDictionary env dflags guts evar =
         (_wCs', bnds) <- solveWantedsTcM wCs
 #endif
         -- reportAllUnsolved _wCs' -- this is causing a panic with dictionary instantiation
-                                  -- revist and fix!
+                                  -- revisit and fix!
         return (evar, bnds)
     in
       (i, runDsMUnsafe env dflags guts (dsEvBinds bs))
 
-#if 1
+-- TODO: Why return the given evar?
 
-#endif
+-- TODO: Try to combine the two runTcMUnsafe calls.
+
+buildDictionary :: HscEnv -> DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe CoreExpr
+buildDictionary env dflags guts inScope ty =
+  do guard (notNull bnds)
+     return $
+       case bnds of
+         -- The common case that we would have gotten a single non-recursive let
+         [NonRec v e] | i == v -> e
+         _                     -> mkCoreLets bnds (varToCoreExpr i)
+ where
+   binder   = localId inScope
+                ("$d" ++ zEncodeString (filter (not . isSpace) (showPpr dflags ty))) ty
+   (i,bnds) = buildDictionary' env dflags guts binder
+
+-- | Make a unique identifier for a specified type, using a provided name.
+localId :: InScopeEnv -> String -> Type -> Id
+localId (inScopeSet,_) str ty =
+  uniqAway inScopeSet (mkLocalId (stringToName str) ty)
+
+stringToName :: String -> Name
+stringToName str =
+  mkSystemVarName (mkUniqueGrimily (fromIntegral (hashString str)))
+                  (mkFastString str)
