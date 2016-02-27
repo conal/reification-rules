@@ -38,13 +38,8 @@ import TcType (isIntegerTy)
     Reification
 --------------------------------------------------------------------}
 
--- #define UseFos
-
 -- Reification operations
 data LamOps = LamOps { unpackV :: Id
-#ifdef UseFos
-                     , varV    :: Id
-#endif
                      , appV    :: Id
                      , lamV    :: Id
                      , reifyV  :: Id
@@ -75,14 +70,6 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
        varApps appV [dom,ran] <$> mapM tryReify [u,v]
-   #ifdef UseFos
-     Lam x e | not (isTyVar x) ->
-       do e' <- tryReify (subst1 x (varApps evalV [xty] [varApps varV [xty] [ystr]]) e)
-          return $ varApps lamV [varType x, exprType e] [ystr, e']
-      where
-        xty  = varType x
-        ystr = stringExpr (uniqVarName x)
-   #else
      Lam x e | not (isTyVar x) ->
        do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
           return $ varApps lamV [xty, exprType e]
@@ -91,7 +78,6 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
          xty           = varType x
          y             = setVarType x (exprType (mkReify (Var x)))
                          -- setVarType x (mkE xty) -- *
-   #endif
      _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
     where
@@ -198,18 +184,9 @@ mkLamOps = do
        where
          err = "reify installation: couldn't find "
                ++ str ++ " in " ++ moduleNameString modu
-      lookupHos = lookupRdr (mkModuleName
-#ifdef UseFos
-                             "ReificationRules.FOS"
-#else
-                             "ReificationRules.HOS"
-#endif
-                            )
+      lookupHos = lookupRdr (mkModuleName "ReificationRules.HOS")
       findHosId = lookupHos lookupId
   unpackV <- lookupRdr (mkModuleName "GHC.CString") lookupId "unpackCString#"
-#ifdef UseFos
-  varV    <- findHosId "varP"
-#endif
   appV    <- findHosId "appP"
   lamV    <- findHosId "lamP"
   reifyV  <- findHosId "reifyP"
@@ -224,11 +201,6 @@ on_mg_rules :: Unop [CoreRule] -> Unop ModGuts
 on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
 
 type Unop a = a -> a
-
-#ifdef UseFos
-uniqVarName :: Var -> String
-uniqVarName v = uqVarName v ++ "_" ++ show (varUnique v)
-#endif
 
 uqVarName :: Var -> String
 uqVarName = getOccString . varName

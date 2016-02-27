@@ -39,7 +39,6 @@ Library
                     ReificationRules.ShowUtils
                     ReificationRules.Prim
                     ReificationRules.Exp
-                    ReificationRules.FOS
                     ReificationRules.HOS
                     ReificationRules.Plugin
   ghc-options:      -Wall
