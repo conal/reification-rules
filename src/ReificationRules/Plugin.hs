@@ -6,7 +6,7 @@
 
 {-# OPTIONS_GHC -Wall #-}
 
--- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
+{-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
 -- {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
 
 ----------------------------------------------------------------------
@@ -23,7 +23,9 @@
 
 module ReificationRules.Plugin (plugin) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (guard)
+import Data.Maybe (fromMaybe)
 
 import GhcPlugins
 import DynamicLoading
@@ -62,39 +64,43 @@ traceRewrite _ = id
 #endif
 
 reify :: LamOps -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
-reify (LamOps {..}) _dflags _inScope = traceRewrite "reify rule" $ \ case 
-  e | pprTrace "reify: try" (ppr e) False -> undefined
-  App u v | not (isTyCoArg v)
-          , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
-    varApps appV [dom,ran] <$> mapM tryReify [u,v]
-#ifdef UseFos
-  Lam x e | not (isTyVar x) ->
-    Just $ varApps lamV [varType x, exprType e]
-             [ ystr ,
-               mkReify (subst1 x (varApps evalV [xty] [varApps varV [xty] [ystr]]) e) ]
-    where
-      xty  = varType x
-      ystr = stringExpr (uniqVarName x)
-#else
-  Lam x e | not (isTyVar x) ->
-    Just $ varApps lamV [xty, exprType e]
-             [ stringExpr (uqVarName y)
-             , Lam y (mkReify (subst1 x (varApps evalV [xty] [Var y]) e)) ]
-    where
-      xty           = varType x
-      y             = setVarType x (exprType (mkReify (Var x)))
-                      -- setVarType x (mkE xty) -- *
-#endif
-  _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
-        Nothing
+reify (LamOps {..}) _dflags _inScope = go
  where
-   stringExpr :: String -> CoreExpr
-   stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
-
-   mkReify e = varApps reifyV [exprType e] [e]
-   tryReify :: CoreExpr -> Maybe CoreExpr
-   -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
-   tryReify e = guard (reifiableExpr e) >> Just (mkReify e)
+   go :: CoreExpr -> Maybe CoreExpr
+   go = traceRewrite "reify go" $ \ case 
+     e | pprTrace "reify:" (ppr e) False -> undefined
+     App u v | not (isTyCoArg v)
+             , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
+       varApps appV [dom,ran] <$> mapM tryReify [u,v]
+   #ifdef UseFos
+     Lam x e | not (isTyVar x) ->
+       do e' <- tryReify (subst1 x (varApps evalV [xty] [varApps varV [xty] [ystr]]) e)
+          return $ varApps lamV [varType x, exprType e] [ystr, e']
+      where
+        xty  = varType x
+        ystr = stringExpr (uniqVarName x)
+   #else
+     Lam x e | not (isTyVar x) ->
+       do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
+          return $ varApps lamV [xty, exprType e]
+                     [stringExpr (uqVarName y), Lam y e']
+       where
+         xty           = varType x
+         y             = setVarType x (exprType (mkReify (Var x)))
+                         -- setVarType x (mkE xty) -- *
+   #endif
+     _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
+           Nothing
+    where
+      stringExpr :: String -> CoreExpr
+      stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
+      mkReify :: CoreExpr -> CoreExpr
+      mkReify e = varApps reifyV [exprType e] [e]
+      tryReify :: CoreExpr -> Maybe CoreExpr
+      -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
+      -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
+      tryReify e | reifiableExpr e = go e <|> Just (mkReify e)
+                 | otherwise = pprTrace "Not reifiable:" (ppr e) Nothing
 
 -- TODO: Replace unpackV by unpackStr in LamOps.
 
