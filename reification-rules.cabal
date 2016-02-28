@@ -27,6 +27,7 @@ Library
                   , constraints
                   , transformers >= 0.4
                   , ty >= 0.1.5
+                  , hermit >= 1.0.0.1
                   , circat
 
 --                   , kure >= 2.16.0
@@ -40,7 +41,9 @@ Library
                     ReificationRules.Prim
                     ReificationRules.Exp
                     ReificationRules.HOS
+                    ReificationRules.BuildDictionary
                     ReificationRules.Plugin
+                    ReificationRules.MonoPrims
   ghc-options:      -Wall
 
 
