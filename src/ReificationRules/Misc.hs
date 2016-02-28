@@ -74,6 +74,8 @@ type (:=>) = (->)
     Equality
 --------------------------------------------------------------------}
 
+-- TODO: Rename Eq1'
+
 -- | Equality when we don't know that the type parameters match.
 class Eq1' f where
   (====) :: f a -> f b -> Bool
