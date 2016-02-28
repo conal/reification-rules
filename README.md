@@ -1,2 +1,2 @@
-Core reification via rules
+GHC Core reification via rules
 
