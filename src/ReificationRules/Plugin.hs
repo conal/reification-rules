@@ -48,6 +48,7 @@ data LamOps = LamOps { unpackV :: Id
                      , lamV    :: Id
                      , reifyV  :: Id
                      , evalV   :: Id
+                     , primFun :: Id -> Maybe CoreExpr
                      }
 
 -- TODO: drop reifyV, since it's in the rule
@@ -82,8 +83,7 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
          xty           = varType x
          y             = setVarType x (exprType (mkReify (Var x)))
                          -- setVarType x (mkE xty) -- *
---      Var v | Just monoPrim <- M.lookup (uqVarName v) stdMethMap =
---        varApps ...
+     Var v | j@(Just _) <- primFun v -> j
      _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
     where
@@ -246,7 +246,17 @@ mkLamOps = do
   lamV    <- findHosId "lamP"
   reifyV  <- findHosId "reifyP"
   evalV   <- findHosId "evalP"
+  constV  <- findHosId "constP"
+  primMap <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
+                  stdMethMap
+  let primFun v = (\ primId -> varApps constV [tyArg1 (idType primId)] [Var primId])
+                  <$> M.lookup (uqVarName v) primMap
   return (LamOps { .. })
+ where
+   -- Used to extract Prim tycon argument
+   tyArg1 :: Unop Type
+   tyArg1 (tyConAppArgs_maybe -> Just [arg]) = arg
+   tyArg1 ty = pprPanic "mkLamOps/tyArg1 non-unary" (ppr ty)
 
 {--------------------------------------------------------------------
     Misc
