@@ -5,12 +5,16 @@ default: Tests
 check-ghc:
 	ghc --version
 
-go: Tests
+go: Tests Makefile ../dist
 	./Tests
 
 GhcFlags += -dcore-lint
 GhcFlags += -fforce-recomp
-GhcFlags += -ddump-simpl
+# GhcFlags += -ddump-simpl
+# GhcFlags += -ddump-simpl-iterations
+
+# GhcFlags += -dshow-passes
+# GhcFlags += -ddump-inlinings
 
 GhcFlags += -dsuppress-idinfo
 GhcFlags += -dsuppress-module-prefixes
@@ -19,8 +23,11 @@ GhcFlags += -dsuppress-uniques
 # GhcFlags += -dsuppress-type-signatures
 # GhcFlags += -dsuppress-type-applications
 
+# GhcFlags += -dsuppress-all
+
 GhcFlags += -ddump-rule-rewrites
 # GhcFlags += -ddump-rule-firings
+# GhcFlags += -ddump-simpl-trace
 
 # GhcFlags += -dverbose-core2core
 

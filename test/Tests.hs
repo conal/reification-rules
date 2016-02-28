@@ -16,13 +16,15 @@
 -- Reification tests
 ----------------------------------------------------------------------
 
-module Tests where
+-- module Tests where
 
 -- TODO: explicit exports
 
 import ReificationRules.Misc (Unop)
 
 import ReificationRules.HOS (EP,reifyP)
+
+import Circat.Doubli
 
 -- t1 :: EP (Unop Bool)
 -- t1 = reifyP not
@@ -36,11 +38,20 @@ import ReificationRules.HOS (EP,reifyP)
 -- ta :: EP (Bool -> Bool)
 -- ta = reifyP (\ x -> x)
 
-t4 :: EP (Int -> Bool)
-t4 = reifyP (\ x -> x > 3)
+-- t4 :: EP (Int -> Bool)
+-- t4 = reifyP (\ x -> x > 3)
 
--- t4' :: EP (Bool -> Bool)
--- t4' = reifyP (\ x -> not (not x))
+-- t5 :: EP (Bool -> Bool)
+-- t5 = reifyP (\ x -> not (not x))
 
--- t5 :: EP (Int -> Int -> Bool)
--- t5 = reifyP (>)
+-- t6 :: EP (Bool -> Bool -> Bool)
+-- t6 = reifyP (\ x y -> x || not y)
+
+foo :: EP (Int -> Int -> Bool)
+foo = reifyP (\ x y -> x > y + 3)
+
+-- foo :: EP (Double -> Double -> Bool)
+-- foo = reifyP (\ x y -> x > y + 3)
+
+main :: IO ()
+main = print (fst foo)

@@ -24,3 +24,4 @@ test/Examples
 *.o
 *.dump-simpl
 test/o*
+test/Tests
