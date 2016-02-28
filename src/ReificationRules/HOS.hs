@@ -28,8 +28,6 @@ module ReificationRules.HOS (EP,appP,lamP,reifyP,evalP,constP) where
 
 import Data.Map
 
--- Int primitives
-import GHC.Classes
 import GHC.Types
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
@@ -59,7 +57,7 @@ app :: E' p (a -> b) -> E' p a -> E' p b
 (f,mf) `app` (x,mx) = (f :^ x, mf `lub` mx)
 
 lam :: Name -> (E' p a -> E' p b) -> E' p (a -> b)
-lam nm f = (Lam (V nm') body, mf)
+lam nm f = (Lam (VarPat (V nm')) body, mf)
  where
    (body,mb) = f (Var (V nm'),bot)
    (mbN,mf)  = insertLookupWithKey (const (+)) nm 1 mb

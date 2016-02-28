@@ -2,6 +2,7 @@
 {-# LANGUAGE GADTs          #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternGuards  #-}
+{-# LANGUAGE TypeOperators  #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
@@ -27,6 +28,7 @@ module ReificationRules.Exp where
 
 import Data.Functor.Classes
 
+import ReificationRules.Misc (Unit,(:*),Eq1'(..))
 import ReificationRules.ShowUtils
 
 -- | Variable names
@@ -40,13 +42,37 @@ instance Show (V a) where
 
 varName :: V a -> Name
 varName (V name) = name
+
+instance Eq1' V where
+  V a ==== V b = a == b
+
+infixr 1 :$
+infixr 8 :@
+
+-- | Binding patterns
+data Pat :: * -> * where
+  UnitPat :: Pat Unit
+  VarPat  :: V a -> Pat a
+  (:$)    :: Pat a -> Pat b -> Pat (a :* b)
+  (:@)    :: Pat a -> Pat a -> Pat a
+
+-- NOTE: ":@" is named to suggest "as patterns", but is more general ("and patterns").
+
+-- TODO: Rename UnitPat and VarPat to PUnit and PVar
+
+instance Show (Pat a) where
+  showsPrec _ UnitPat     = showString "()"
+  showsPrec p (VarPat v)  = showsPrec p v
+  showsPrec p (a :$ b)    = showsPair p a b
+  showsPrec p (a :@ b)    = showsOp2 False "@" (8,AssocRight) p a b
+
 infixl 9 :^
 -- | Lambda expressions
 data E :: (* -> *) -> (* -> *) where
   Var     :: V a -> E p a
   ConstE  :: p a -> E p a
   (:^)    :: E p (a -> b) -> E p a -> E p b
-  Lam     :: V a -> E p b -> E p (a -> b)
+  Lam     :: Pat a -> E p b -> E p (a -> b)
 
 instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
 #ifdef Sugared
