@@ -8,7 +8,7 @@
 {-# OPTIONS_GHC -Wall #-}
 
 {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
--- {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
+{-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
 
 ----------------------------------------------------------------------
 -- |
@@ -26,7 +26,11 @@ module ReificationRules.Plugin (plugin) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (guard)
+import Control.Arrow (first)
 import Data.Maybe (fromMaybe)
+import Data.Char (toLower)
+import qualified Data.Map as M
+import Text.Printf (printf)
 
 import GhcPlugins
 import DynamicLoading
@@ -66,7 +70,7 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
  where
    go :: CoreExpr -> Maybe CoreExpr
    go = \ case 
-     e | pprTrace "reify go:" (ppr e) False -> undefined
+     -- e | pprTrace "reify go:" (ppr e) False -> undefined
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
        varApps appV [dom,ran] <$> mapM tryReify [u,v]
@@ -78,7 +82,7 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
          xty           = varType x
          y             = setVarType x (exprType (mkReify (Var x)))
                          -- setVarType x (mkE xty) -- *
-     _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
+     _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
     where
       stringExpr :: String -> CoreExpr
@@ -89,7 +93,8 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
       -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
       -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
       tryReify e | reifiableExpr e = go e <|> Just (mkReify e)
-                 | otherwise = pprTrace "Not reifiable:" (ppr e) Nothing
+                 | otherwise = -- pprTrace "Not reifiable:" (ppr e)
+                               Nothing
 
 -- TODO: Replace unpackV by unpackStr in LamOps.
 
@@ -143,6 +148,53 @@ badTyCon tc = qualifiedName (tyConName tc) `elem`
 
 reifiableExpr :: CoreExpr -> Bool
 reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
+
+{--------------------------------------------------------------------
+    Primitive translation
+--------------------------------------------------------------------}
+
+stdClassOpInfo :: [(String,String,[String],[(String,String)])]
+stdClassOpInfo =
+   [ ( "Eq","BinRel",["Bool","Int","Doubli"]
+     , [("==","Eq"), ("/=","Ne")])
+   , ( "Ord","BinRel",["Bool","Int","Doubli"]
+     , [("<","Lt"),(">","Gt"),("<=","Le"),(">=","Ge")])
+   , ( "Num","Unop",["Int","Doubli"]
+     , [("negate","Negate")])
+   , ( "Num","Binop",["Int","Doubli"]
+     , [("+","Add"),("-","Sub"),("*","Mul")])
+   , ( "Floating","Unop",["Doubli"]
+     , [("exp","Exp"),("cos","Cos"),("sin","Sin")])
+   , ( "Fractional","Unop",["Doubli"]
+     , [("recip","Recip")])
+   , ( "Fractional","Binop",["Doubli"]
+     , [("/","Divide")])
+   ]
+
+-- Name of prim type specialization in MonoPrims
+primAt :: String -> String -> String
+primAt prim ty = toLower (head ty) : prim
+
+-- Map '$fNumInt_$c+' to 'primAddInt' etc (with module qualifiers)
+stdMethMap :: M.Map String String
+stdMethMap = M.fromList $
+  [ (opName cls ty op prim, primAt prim ty)
+  | (cls,_,tys,ps) <- stdClassOpInfo, ty <- tys, (op,prim) <- ps ]
+ where
+   -- Unqualified method name, e.g., "$fNumInt_$c+".
+   -- Eq & Ord for Int use "eqInt" etc.
+   opName :: String -> String -> String -> String -> String
+   opName cls ty op prim | ty == "Int" && cls `elem` ["Eq","Ord"] =
+                             onHead toLower prim ++ "Int"
+                         | otherwise = printf "$f%s%s_$c%s" cls ty op
+
+-- Generate code for MonoPrims
+_monoPrimDefs :: String
+_monoPrimDefs = unlines
+  [ printf "%-7s = %6sP :: Prim (%-6s %-6s)" pat prim tyOp ty
+  | (_cls,tyOp,tys,ps) <- stdClassOpInfo, ty <- tys
+  , (_op,prim) <- ps, let pat = primAt prim ty ]
+
 
 {--------------------------------------------------------------------
     Plugin installation
@@ -219,3 +271,7 @@ subst ps = substExpr (error "subst: no SDoc") (foldr add emptySubst ps)
 
 subst1 :: Id -> CoreExpr -> Unop CoreExpr
 subst1 v e = subst [(v,e)]
+
+onHead :: Unop a -> Unop [a]
+onHead f (c:cs) = f c : cs
+onHead _ []     = []
