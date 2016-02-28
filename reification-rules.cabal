@@ -30,10 +30,7 @@ Library
                   , hermit >= 1.0.0.1
                   , circat
 
---                   , kure >= 2.16.0
---                   , hermit >= 1.0.0.1
---                   , hermit-extras
---                   , lambda-ccc
+-- I only use hermit for BuildDictionary. Try to drop the dependency.
 
   Exposed-Modules:
                     ReificationRules.Misc
@@ -46,5 +43,3 @@ Library
                     ReificationRules.MonoPrims
   ghc-options:      -Wall
 
-
-  -- TODO: remove FOS or HOS
