@@ -82,6 +82,8 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
          xty           = varType x
          y             = setVarType x (exprType (mkReify (Var x)))
                          -- setVarType x (mkE xty) -- *
+--      Var v | Just monoPrim <- M.lookup (uqVarName v) stdMethMap =
+--        varApps ...
      _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
     where
@@ -188,13 +190,14 @@ stdMethMap = M.fromList $
                              onHead toLower prim ++ "Int"
                          | otherwise = printf "$f%s%s_$c%s" cls ty op
 
+#if 0
 -- Generate code for MonoPrims
-_monoPrimDefs :: String
-_monoPrimDefs = unlines
+monoPrimDefs :: String
+monoPrimDefs = unlines
   [ printf "%-7s = %6sP :: Prim (%-6s %-6s)" pat prim tyOp ty
   | (_cls,tyOp,tys,ps) <- stdClassOpInfo, ty <- tys
   , (_op,prim) <- ps, let pat = primAt prim ty ]
-
+#endif
 
 {--------------------------------------------------------------------
     Plugin installation
