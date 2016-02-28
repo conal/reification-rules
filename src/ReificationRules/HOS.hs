@@ -30,6 +30,7 @@ import Data.Map
 
 -- Int primitives
 import GHC.Classes
+import GHC.Types
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
@@ -37,8 +38,7 @@ import GHC.CString (unpackCString#)
 import Circat.Misc (Unop,Binop,Ternop)
 #endif
 
--- -- For rules experiment
--- import Circat.Doubli
+import Circat.Doubli
 
 import ReificationRules.Exp
 import ReificationRules.Prim
@@ -119,23 +119,26 @@ constP = constE'
     Rules
 --------------------------------------------------------------------}
 
+litE :: HasLit a => a -> EP a
+litE = constP . LitP . toLit
+
 {-# RULES
 
 "reifyP/evalP" forall e. reifyP (evalP e) = e
 
--- "reifyP / >" forall u v. reifyP (u > v) = app2 GtP (reifyP u) (reifyP v)
-
--- "reifyP / >" reifyP (>) = constP GtP
-
--- "reifyP / > Int"    reifyP ((>) :: Int    -> Int    -> Bool) = constP GtP
--- "reifyP / > Bool"   reifyP ((>) :: Bool   -> Bool   -> Bool) = constP GtP
--- "reifyP / > Doubli" reifyP ((>) :: Doubli -> Doubli -> Bool) = constP GtP
-
-"reifyP gtInt" reifyP gtInt = constP GtP
-
 "reifyP not" reifyP not = constP NotP
+"reifyP (&&)" reifyP (&&) = constP AndP
+"reifyP (||)" reifyP (||) = constP OrP
 
-"reifyP False" reifyP False = constP (LitP (BoolL False))
+"reifyP True"  reifyP True  = litE True
+"reifyP False" reifyP False = litE False
+
+"reifyP I#" forall n. reifyP (I#     n) = litE (I# n)
+"reifyP D#" forall n. reifyP (Doubli n) = litE (Doubli n)
+
+-- TODO: Drop Doubli, and use
+-- 
+-- "reifyP D#" forall n. reifyP (D# n) = litE (D# n)
 
   #-}
 
