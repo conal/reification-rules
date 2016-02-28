@@ -395,7 +395,6 @@ instance PrimBasics Prim where
 
 -- instance EvalableP Prim where evalP = eval
 
-
 instance HasOpInfo Prim where
   opInfo MulP    = Just $ OpInfo "*"     (7,AssocLeft )
   opInfo DivideP = Just $ OpInfo "/"     (7,AssocLeft )
