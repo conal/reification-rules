@@ -22,7 +22,7 @@
 -- <http://www.cse.chalmers.se/~emax/documents/axelsson2013using.pdf>.
 ----------------------------------------------------------------------
 
-module ReificationRules.HOS (EP,appP,lamP,reifyP,evalP,constP) where
+module ReificationRules.HOS (EP,toE,appP,lamP,reifyP,evalP,constP) where
 
 -- TODO: explicit exports
 
@@ -52,6 +52,9 @@ lub :: NameMap -> NameMap -> NameMap
 lub = unionWith max
 
 type E' p a = (E p a, NameMap)
+
+toE :: E' p a -> E p a
+toE = fst
 
 app :: E' p (a -> b) -> E' p a -> E' p b
 (f,mf) `app` (x,mx) = (f :^ x, mf `lub` mx)
