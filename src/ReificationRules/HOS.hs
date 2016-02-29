@@ -125,11 +125,15 @@ litE = constP . LitP . toLit
 
 {-# RULES
 
-"reifyP/evalP" forall e. reifyP (evalP e) = e
+"reifyP . evalP" forall e. reifyP (evalP e) = e
 
-"reifyP not" reifyP not = constP NotP
+"reifyP not"  reifyP not  = constP NotP
 "reifyP (&&)" reifyP (&&) = constP AndP
 "reifyP (||)" reifyP (||) = constP OrP
+
+"reifyP fst" reifyP fst = constP ExlP
+"reifyP snd" reifyP snd = constP ExrP
+"reifyP (,)" reifyP (,) = constP PairP
 
 "reifyP True"  reifyP True  = litE True
 "reifyP False" reifyP False = litE False
