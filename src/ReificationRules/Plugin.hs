@@ -38,19 +38,23 @@ import DynamicLoading
 import Kind (isLiftedTypeKind)
 import Type (coreView)
 import TcType (isIntegerTy)
+import FamInstEnv (normaliseType)
+
+import ReificationRules.BuildDictionary
 
 {--------------------------------------------------------------------
     Reification
 --------------------------------------------------------------------}
 
 -- Reification operations
-data LamOps = LamOps { appV    :: Id
-                     , lamV    :: Id
-                     , reifyV  :: Id
-                     , evalV   :: Id
-                     , primFun :: Id -> Maybe CoreExpr
-                     , abstPV  :: Id
-                     , reprPV  :: Id
+data LamOps = LamOps { appV     :: Id
+                     , lamV     :: Id
+                     , reifyV   :: Id
+                     , evalV    :: Id
+                     , primFun  :: Id -> Maybe CoreExpr
+                     , abstPV   :: Id
+                     , reprPV   :: Id
+                     , hasRepMeth :: HasRepMeth
                      }
 
 -- TODO: drop reifyV, since it's in the rule
@@ -68,8 +72,8 @@ traceRewrite str f a = tr <$> f a
 traceRewrite _ = id
 #endif
 
-reify :: LamOps -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
-reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
+reify :: LamOps -> ModGuts -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
+reify (LamOps {..}) _guts _dflags _inScope = traceRewrite "reify go" go
  where
    go :: CoreExpr -> Maybe CoreExpr
    go = \ case 
@@ -111,10 +115,6 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
    unRepMeth _ = Nothing
-
--- * Is it safe to reuse x's unique here? If not, use uniqAway x and then
--- setVarType. I can also avoid the issue by forming reify . f . eval. I could
--- include the Id for (.) in LamOps. Or bundle reify <~ eval as reifyFun.
 
 varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
 varApps v tys es = mkApps (Var v) (map Type tys ++ es)
@@ -218,16 +218,16 @@ monoPrimDefs = unlines
     Plugin installation
 --------------------------------------------------------------------}
 
-mkReifyRule :: CoreM CoreRule
+mkReifyRule :: CoreM (ModGuts -> CoreRule)
 mkReifyRule = reRule <$> mkLamOps
  where
-   reRule :: LamOps -> CoreRule
-   reRule ops =
+   reRule :: LamOps -> ModGuts -> CoreRule
+   reRule ops guts =
      BuiltinRule { ru_name  = fsLit "reify"
                  , ru_fn    = varName (reifyV ops)
                  , ru_nargs = 2  -- including type arg
                  , ru_try   = \ dflags inScope _fn [_ty,arg] ->
-                                 reify ops dflags inScope arg
+                                 reify ops guts dflags inScope arg
                  }
 
 plugin :: Plugin
@@ -239,8 +239,7 @@ install _opts todos =
      rr <- mkReifyRule
      -- For now, just insert the rule.
      -- TODO: add "reify_" bindings and maybe rules.
-     pprTrace "plugin install" (ppr rr) (return ())
-     let pass = pure . on_mg_rules (rr :)
+     let pass guts = pure (on_mg_rules (rr guts :) guts)
      return $ CoreDoPluginPass "Reify insert rule" pass : todos
 
 mkLamOps :: CoreM LamOps
@@ -267,12 +266,52 @@ mkLamOps = do
                   stdMethMap
   let primFun v = (\ primId -> varApps constV [tyArg1 (idType primId)] [Var primId])
                   <$> M.lookup (uqVarName v) primMap
+  hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
   return (LamOps { .. })
  where
    -- Used to extract Prim tycon argument
    tyArg1 :: Unop Type
    tyArg1 (tyConAppArgs_maybe -> Just [arg]) = arg
    tyArg1 ty = pprPanic "mkLamOps/tyArg1 non-unary" (ppr ty)
+
+-- * Is it safe to reuse x's unique here? If not, use uniqAway x and then
+-- setVarType. I can also avoid the issue by forming reify . f . eval. I could
+-- include the Id for (.) in LamOps. Or bundle reify <~ eval as reifyFun. We
+-- might have to push to get (.) inlined promptly (perhaps with a reifyFun
+-- rule). It'd be nice to preserve lambda-bound variable names, as in the
+-- current implementation.
+
+-- Extract HasRep and Rep from the type of abstPV
+repTcsFromAbstPTy :: Type -> (TyCon,TyCon)
+repTcsFromAbstPTy abstPvTy = (hasRepTc, repTc)
+ where
+   -- abstP :: (HasRep a, Rep a ~ a') => EP (a' -> a)
+   ([hasRepTy,eqTy],_)   = splitFunTys (dropForAlls abstPvTy)
+   Just hasRepTc         = tyConAppTyCon_maybe hasRepTy
+   Just [_star,repATy,_] = tyConAppArgs_maybe eqTy
+   Just repTc            = tyConAppTyCon_maybe repATy
+
+-- TODO: replace hasRepTc and repTc in LamOps by hasRepMethodF applied to them.
+
+type HasRepMeth = DynFlags -> ModGuts -> Type -> InScopeEnv -> Maybe (Id -> CoreExpr)
+
+hasRepMethodM :: (TyCon,TyCon) -> CoreM HasRepMeth
+hasRepMethodM (hasRepTc,repTc) =
+  do hscEnv <- getHscEnv
+     eps    <- liftIO (hscEPS hscEnv)
+     return $ \ dflags guts ty inScope ->
+       let (mkEqBox -> eq,ty') =
+             normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
+                           Nominal (mkTyConApp repTc [ty])
+           mfun :: CoreExpr -> Id -> CoreExpr
+           mfun dict = pprTrace "hasRepMeth dict" (ppr dict) $
+                       \ meth -> pprTrace "hasRepMeth meth" (ppr meth) $
+                                 varApps meth [ty] [dict,Type ty',eq]
+       in
+         pprTrace "hasRepMeth ty" (ppr ty) $
+         mfun <$> buildDictionary hscEnv dflags guts inScope (mkTyConApp hasRepTc [ty])
+
+-- I could include hscEnv and eps in LamOps.
 
 {--------------------------------------------------------------------
     Misc
