@@ -3,6 +3,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternGuards  #-}
 {-# LANGUAGE TypeOperators  #-}
+{-# LANGUAGE ViewPatterns   #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
@@ -85,8 +86,6 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
     showParen (p > 0) $
     showString "let " . showsPrec 0 q . showString " = " . showsPrec 0 rhs
     . showString " in " . showsPrec 0 body
---   showsPrec p (ConstE ((==== pairP) -> True) :^ u :^ v)
---                           = showsPair p u v
 #endif
   showsPrec p (ConstE prim :^ u :^ v) | Just (OpInfo op fixity) <- opInfo prim =
     showsOp2 False op fixity p u v

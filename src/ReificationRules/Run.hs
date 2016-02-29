@@ -22,9 +22,10 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.Run
-  ( go,go',goSep,run,runSep,goM,goM',goMSep
-  , goNew, goNew'
+  ( Okay, go,go',goSep,run,runSep,goM,goM',goMSep
   ) where
+
+-- TODO: clean up interfaces.
 
 import Prelude
 
@@ -46,16 +47,34 @@ ranksep n = ("ranksep",show n)
 
 type Okay = Uncurriable (:>) ()
 
-go' :: Okay a => String -> [Attr] -> a -> IO ()
-go' = goNew'   -- Tidy up later
-{-# INLINE go' #-}
-
 go :: Okay a => String -> a -> IO ()
-go name = go' name []
-{-# INLINE go #-}
+go = error "go: not implemented"
+-- go name = go' name []
+{-# NOINLINE go #-}
+
+go' :: Okay a => String -> [Attr] -> a -> IO ()
+go' = error "go': not implemented"
+-- go' name attrs f = run name attrs (reifyP f)
+{-# NOINLINE go' #-}
 
 goSep :: Okay a => String -> Double -> a -> IO ()
-goSep name s = go' name [ranksep s]
+goSep = error "goSep: not implemented"
+-- goSep name s = go' name [ranksep s]
+{-# NOINLINE goSep #-}
+
+-- Experimenting with rules instead of INLINE.
+
+{-# RULES
+
+"go" forall name f. go name f = run name [] (reifyP f)
+
+-- "go"    forall name         . go name          = go' name []
+
+"go'"   forall name attrs f . go' name attrs f = run name attrs (reifyP f)
+
+"goSep" forall name s       . goSep name s     = go' name [ranksep s]
+
+ #-}
 
 genVerilog :: Bool
 genVerilog = False
@@ -77,14 +96,6 @@ run name attrs (toE -> e) = do when showPretty $ putStrLn (name ++ " = " ++ show
 
 runSep :: Okay a => String -> Double -> EP a -> IO ()
 runSep name s = run name [ranksep s]
-
-goNew' :: Okay a => String -> [Attr] -> a -> IO ()
-goNew' name attrs f = run name attrs (reifyP f)
-{-# INLINE goNew' #-}
-
-goNew :: Okay a => String -> a -> IO ()
-goNew name = goNew' name []
-{-# INLINE goNew #-}
 
 -- Diagram and Verilog
 outGV :: String -> [Attr] -> UU -> IO ()

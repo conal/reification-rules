@@ -1,6 +1,6 @@
 ghc = ~/bin/new-ghc/ghc
 
-default: Tests
+default: go
 
 check-ghc:
 	ghc --version
@@ -45,4 +45,12 @@ compile:
 circat:
 	cd ../../circat ; make
 	make compile
+
+HI_DIR = ../dist/build/ReificationRules
+
+%.iface: $(HI_DIR)/%.hi
+	$(ghc) --show-iface $(HI_DIR)/$*.hi > $*.iface
+
+ifaces: Run.iface
+
 

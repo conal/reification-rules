@@ -185,8 +185,8 @@ data Prim :: * -> * where
   InrP             :: Prim (b -> a :+ b)
   PairP            :: Prim (a -> b -> a :* b)
   IfP              :: IfCat (:>) a => Prim (Bool :* (a :* a) -> a)
-  AbstP            :: (HasRep a, Rep a ~ a') => Prim (a' -> a)
-  ReprP            :: (HasRep a, Rep a ~ a') => Prim (a -> a')
+  AbstP            :: HasRep a => Prim (Rep a -> a)
+  ReprP            :: HasRep a => Prim (a -> Rep a)
   BottomP          :: BottomCat (:>) a => Prim a
   DelayP           :: (GenBuses s, Show s) => s -> Prim (s -> s)
 
@@ -409,4 +409,5 @@ instance HasOpInfo Prim where
   opInfo GtP     = Just $ OpInfo ">"     (4,AssocNone )
   opInfo LeP     = Just $ OpInfo "<="    (4,AssocNone )
   opInfo GeP     = Just $ OpInfo ">="    (4,AssocNone )
+  opInfo PairP   = Just $ OpInfo ","     (0,AssocNone )
   opInfo _       = Nothing

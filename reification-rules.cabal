@@ -23,7 +23,7 @@ Library
   Build-Depends:    base<5
                   , containers
                   , ghc >= 7.10.3
-                  , ghc-prim >= 0.5.0.0
+                  , ghc-prim
                   , constraints
                   , transformers >= 0.4
                   , ty >= 0.1.5
@@ -41,5 +41,7 @@ Library
                     ReificationRules.BuildDictionary
                     ReificationRules.Plugin
                     ReificationRules.MonoPrims
+                    ReificationRules.ToCCC
+                    ReificationRules.Run
   ghc-options:      -Wall
 

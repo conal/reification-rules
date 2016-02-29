@@ -22,7 +22,9 @@
 -- <http://www.cse.chalmers.se/~emax/documents/axelsson2013using.pdf>.
 ----------------------------------------------------------------------
 
-module ReificationRules.HOS (EP,toE,appP,lamP,reifyP,evalP,constP) where
+module ReificationRules.HOS
+  ( EP,toE,appP,lamP,reifyP,evalP,constP,abst,repr,abstP,reprP
+  ) where
 
 -- TODO: explicit exports
 
@@ -35,6 +37,8 @@ import GHC.CString (unpackCString#)
 #ifdef Testing
 import Circat.Misc (Unop,Binop,Ternop)
 #endif
+import qualified Circat.Rep as Rep
+import Circat.Rep (HasRep,Rep)
 
 import Circat.Doubli
 
@@ -117,6 +121,33 @@ constP = constE'
 -- Remove them later.
 
 {--------------------------------------------------------------------
+    HasRep
+--------------------------------------------------------------------}
+
+-- Synonyms for HasRep methods. Using these names postpones the method selector
+-- unfolding built-in rule.
+
+-- abst :: HasRep a => Rep a -> a
+-- repr :: HasRep a => a -> Rep a
+
+abst :: (HasRep a, Rep a ~ a') => a' -> a
+abst = Rep.abst
+
+repr :: (HasRep a, Rep a ~ a') => a -> a'
+repr = Rep.repr
+
+-- I don't know why, but I was unable to find AbstP or ReprP from Plugin.
+
+-- abstP :: HasRep a => EP (Rep a -> a)
+-- reprP :: HasRep a => EP (a -> Rep a)
+
+abstP :: (HasRep a, Rep a ~ a') => EP (a' -> a)
+abstP = constP AbstP
+
+reprP :: (HasRep a, Rep a ~ a') => EP (a -> a')
+reprP = constP ReprP
+
+{--------------------------------------------------------------------
     Rules
 --------------------------------------------------------------------}
 
@@ -126,6 +157,13 @@ litE = constP . LitP . toLit
 {-# RULES
 
 "reifyP . evalP" forall e. reifyP (evalP e) = e
+
+-- "reify abst" reifyP abst = constP AbstP
+-- "reify repr" reifyP repr = constP ReprP
+
+-- I don't know why these rules don't fire.
+"reify abst" reifyP abst = abstP
+"reify repr" reifyP repr = reprP
 
 "reifyP not"  reifyP not  = constP NotP
 "reifyP (&&)" reifyP (&&) = constP AndP

@@ -28,6 +28,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (guard)
 import Control.Arrow (first)
 import Data.Maybe (fromMaybe)
+import Data.List (stripPrefix)
 import Data.Char (toLower)
 import qualified Data.Map as M
 import Text.Printf (printf)
@@ -43,12 +44,13 @@ import TcType (isIntegerTy)
 --------------------------------------------------------------------}
 
 -- Reification operations
-data LamOps = LamOps { unpackV :: Id
-                     , appV    :: Id
+data LamOps = LamOps { appV    :: Id
                      , lamV    :: Id
                      , reifyV  :: Id
                      , evalV   :: Id
                      , primFun :: Id -> Maybe CoreExpr
+                     , abstPV  :: Id
+                     , reprPV  :: Id
                      }
 
 -- TODO: drop reifyV, since it's in the rule
@@ -72,33 +74,43 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
    go :: CoreExpr -> Maybe CoreExpr
    go = \ case 
      -- e | pprTrace "reify go:" (ppr e) False -> undefined
-     App u v | not (isTyCoArg v)
-             , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
-       varApps appV [dom,ran] <$> mapM tryReify [u,v]
+     Var v | j@(Just _) <- primFun v -> j
      Lam x e | not (isTyVar x) ->
        do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
           return $ varApps lamV [xty, exprType e]
                      [stringExpr (uqVarName y), Lam y e']
        where
          xty           = varType x
-         y             = setVarType x (exprType (mkReify (Var x)))
-                         -- setVarType x (mkE xty) -- *
-     Var v | j@(Just _) <- primFun v -> j
+         y             = setVarType x (exprType (mkReify (Var x))) -- *
+     (unRepMeth -> Just e) -> Just e
+     -- Other applications
+     App u v | not (isTyCoArg v)
+             , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
+       varApps appV [dom,ran] <$> mapM tryReify [u,v]
      _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
+   -- helpers
+   stringExpr :: String -> CoreExpr
+   stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
+   mkReify :: CoreExpr -> CoreExpr
+   mkReify e = varApps reifyV [exprType e] [e]
+   tryReify :: CoreExpr -> Maybe CoreExpr
+   -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
+   -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
+   tryReify e | reifiableExpr e = go e <|> Just (mkReify e)
+              | otherwise = -- pprTrace "Not reifiable:" (ppr e)
+                            Nothing
+   unRepMeth :: CoreExpr -> Maybe CoreExpr
+   unRepMeth (collectArgs -> (Var v, args@(length -> 4))) =
+     do nm <- stripPrefix "ReificationRules.HOS." (qualifiedName (varName v))
+        case nm of
+          "abst" -> wrap abstPV
+          "repr" -> wrap reprPV
+          _      -> Nothing
     where
-      stringExpr :: String -> CoreExpr
-      stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
-      mkReify :: CoreExpr -> CoreExpr
-      mkReify e = varApps reifyV [exprType e] [e]
-      tryReify :: CoreExpr -> Maybe CoreExpr
-      -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
-      -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
-      tryReify e | reifiableExpr e = go e <|> Just (mkReify e)
-                 | otherwise = -- pprTrace "Not reifiable:" (ppr e)
-                               Nothing
-
--- TODO: Replace unpackV by unpackStr in LamOps.
+      wrap :: Id -> Maybe CoreExpr
+      wrap prim = Just (mkApps (Var prim) args)
+   unRepMeth _ = Nothing
 
 -- * Is it safe to reuse x's unique here? If not, use uniqAway x and then
 -- setVarType. I can also avoid the issue by forming reify . f . eval. I could
@@ -106,6 +118,9 @@ reify (LamOps {..}) _dflags _inScope = traceRewrite "reify go" go
 
 varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
 varApps v tys es = mkApps (Var v) (map Type tys ++ es)
+
+conApps :: DataCon -> [Type] -> [CoreExpr] -> CoreExpr
+conApps dc tys es = mkConApp dc (map Type tys ++ es)
 
 reifiableKind :: Kind -> Bool
 reifiableKind = isLiftedTypeKind
@@ -239,14 +254,15 @@ mkLamOps = do
        where
          err = "reify installation: couldn't find "
                ++ str ++ " in " ++ moduleNameString modu
-      lookupHos = lookupRdr (mkModuleName "ReificationRules.HOS")
-      findHosId = lookupHos lookupId
-  unpackV <- lookupRdr (mkModuleName "GHC.CString") lookupId "unpackCString#"
+      lookupHos  = lookupRdr (mkModuleName "ReificationRules.HOS")
+      findHosId  = lookupHos lookupId
   appV    <- findHosId "appP"
   lamV    <- findHosId "lamP"
   reifyV  <- findHosId "reifyP"
   evalV   <- findHosId "evalP"
   constV  <- findHosId "constP"
+  abstPV  <- findHosId "abstP"
+  reprPV  <- findHosId "reprP"
   primMap <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
                   stdMethMap
   let primFun v = (\ primId -> varApps constV [tyArg1 (idType primId)] [Var primId])
