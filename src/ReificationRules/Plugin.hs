@@ -24,9 +24,9 @@
 
 module ReificationRules.Plugin (plugin) where
 
-import Control.Applicative ((<|>))
-import Control.Monad (guard)
 import Control.Arrow (first)
+import Control.Applicative (liftA2,(<|>))
+import Control.Monad (guard)
 import Data.Maybe (fromMaybe)
 import Data.List (stripPrefix)
 import Data.Char (toLower)
@@ -40,6 +40,7 @@ import Type (coreView)
 import TcType (isIntegerTy)
 import FamInstEnv (normaliseType)
 
+import ReificationRules.Misc (Binop)
 import ReificationRules.BuildDictionary
 
 {--------------------------------------------------------------------
@@ -47,20 +48,24 @@ import ReificationRules.BuildDictionary
 --------------------------------------------------------------------}
 
 -- Reification operations
-data LamOps = LamOps { appV     :: Id
-                     , lamV     :: Id
-                     , reifyV   :: Id
-                     , evalV    :: Id
-                     , primFun  :: Id -> Maybe CoreExpr
-                     , abstPV   :: Id
-                     , reprPV   :: Id
+data LamOps = LamOps { appV       :: Id
+                     , lamV       :: Id
+                     , reifyV     :: Id
+                     , evalV      :: Id
+                     , primFun    :: Id -> Maybe CoreExpr
+                     , abstV      :: Id
+                     , reprV      :: Id
+                     , abstPV     :: Id
+                     , reprPV     :: Id
                      , hasRepMeth :: HasRepMeth
+                     , abstReprdV :: Id
+                     , inlineV    :: Id                 -- probably drop
                      }
 
 -- TODO: drop reifyV, since it's in the rule
 -- TODO: drop unpackV, since I'll probably replace String by Addr# for names.
 
--- #define Tracing
+#define Tracing
 
 traceRewrite :: (Outputable a, Outputable b, Functor f) =>
                 String -> Unop (a -> f b)
@@ -72,21 +77,27 @@ traceRewrite str f a = tr <$> f a
 traceRewrite _ = id
 #endif
 
-reify :: LamOps -> ModGuts -> DynFlags -> InScopeEnv -> CoreExpr -> Maybe CoreExpr
-reify (LamOps {..}) _guts _dflags _inScope = traceRewrite "reify go" go
+type Rewrite a = a -> Maybe a
+type ReExpr = Rewrite CoreExpr
+
+reify :: LamOps -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
+reify (LamOps {..}) guts dflags inScope = traceRewrite "reify go" go
  where
-   go :: CoreExpr -> Maybe CoreExpr
+   go :: ReExpr
    go = \ case 
-     -- e | pprTrace "reify go:" (ppr e) False -> undefined
+     e | pprTrace "reify go:" (ppr e) False -> undefined
      Var v | j@(Just _) <- primFun v -> j
      Lam x e | not (isTyVar x) ->
        do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
           return $ varApps lamV [xty, exprType e]
                      [stringExpr (uqVarName y), Lam y e']
        where
-         xty           = varType x
-         y             = setVarType x (exprType (mkReify (Var x))) -- *
-     (unRepMeth -> Just e) -> Just e
+         xty = varType x
+         y   = setVarType x (exprType (mkReify (Var x))) -- *
+     Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
+       -- return $ letP v (tryReify rhs) (tryReify e)
+       tryReify (Lam v e `App` rhs)
+     (repMeth <+ traceRewrite "abstReprCase" abstReprCase -> Just e) -> Just e
      -- Other applications
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
@@ -98,14 +109,14 @@ reify (LamOps {..}) _guts _dflags _inScope = traceRewrite "reify go" go
    stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
    mkReify :: CoreExpr -> CoreExpr
    mkReify e = varApps reifyV [exprType e] [e]
-   tryReify :: CoreExpr -> Maybe CoreExpr
+   tryReify :: ReExpr
    -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
    -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
    tryReify e | reifiableExpr e = go e <|> Just (mkReify e)
               | otherwise = -- pprTrace "Not reifiable:" (ppr e)
                             Nothing
-   unRepMeth :: CoreExpr -> Maybe CoreExpr
-   unRepMeth (collectArgs -> (Var v, args@(length -> 4))) =
+   repMeth :: ReExpr
+   repMeth (collectArgs -> (Var v, args@(length -> 4))) =
      do nm <- stripPrefix "ReificationRules.HOS." (qualifiedName (varName v))
         case nm of
           "abst" -> wrap abstPV
@@ -114,19 +125,41 @@ reify (LamOps {..}) _guts _dflags _inScope = traceRewrite "reify go" go
     where
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
-   unRepMeth _ = Nothing
+   repMeth _ = Nothing
+--    -- For *after* abstReprCase
+--    reifyCase :: ReExpr
+--    reifyCase (Case scrut v altsTy alts) | isAbstReprd scrut =
+   abstReprCase :: ReExpr
+   abstReprCase (Case scrut v altsTy alts) | not (isAbstReprd scrut) = -- *
+     mkReify . wrap <$> hasRepMeth dflags guts inScope (exprType scrut)
+    where
+      wrap :: (Id -> CoreExpr) -> CoreExpr
+      -- wrap meth = Case (App (inlined (meth abstV)) (App (meth reprV) scrut)) v altsTy alts
+      wrap meth = Let (NonRec v' reprScrut) $
+                  Case (App (abstReprd (meth abstV)) (Var v')) v altsTy alts
+       where
+         reprScrut = App (meth reprV) scrut
+         v' = zapIdOccInfo $ uniqAway (fst inScope) v `setIdType` exprType reprScrut
+   abstReprCase _ = Nothing
+   abstReprd :: Unop CoreExpr
+   abstReprd e = -- e
+               -- pprTrace "abstReprd" (ppr e) $
+               varApps abstReprdV [exprType e] [e]
+   isAbstReprd :: CoreExpr -> Bool
+   isAbstReprd (collectArgs -> (Var v,_)) | v == abstReprdV = True
+   isAbstReprd _ = False
+
+-- * Maybe check for inline instead.
+
+infixl 3 <+
+(<+) :: Binop (Rewrite a)
+(<+) = liftA2 (<|>)
 
 varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
 varApps v tys es = mkApps (Var v) (map Type tys ++ es)
 
-conApps :: DataCon -> [Type] -> [CoreExpr] -> CoreExpr
-conApps dc tys es = mkConApp dc (map Type tys ++ es)
-
 reifiableKind :: Kind -> Bool
 reifiableKind = isLiftedTypeKind
-
--- reifiableType :: Type -> Bool
--- reifiableType ty = reifiableKind (typeKind ty)
 
 -- Types we know how to handle
 reifiableType :: Type -> Bool
@@ -255,13 +288,17 @@ mkLamOps = do
                ++ str ++ " in " ++ moduleNameString modu
       lookupHos  = lookupRdr (mkModuleName "ReificationRules.HOS")
       findHosId  = lookupHos lookupId
-  appV    <- findHosId "appP"
-  lamV    <- findHosId "lamP"
-  reifyV  <- findHosId "reifyP"
-  evalV   <- findHosId "evalP"
-  constV  <- findHosId "constP"
-  abstPV  <- findHosId "abstP"
-  reprPV  <- findHosId "reprP"
+  appV       <- findHosId "appP"
+  lamV       <- findHosId "lamP"
+  reifyV     <- findHosId "reifyP"
+  evalV      <- findHosId "evalP"
+  constV     <- findHosId "constP"
+  abstV      <- findHosId "abst"
+  reprV      <- findHosId "repr"
+  abstPV     <- findHosId "abstP"
+  reprPV     <- findHosId "reprP"
+  abstReprdV <- findHosId "abstReprd"
+  inlineV    <- lookupRdr (mkModuleName "GHC.Exts") lookupId "inline"
   primMap <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
                   stdMethMap
   let primFun v = (\ primId -> varApps constV [tyArg1 (idType primId)] [Var primId])
@@ -293,20 +330,21 @@ repTcsFromAbstPTy abstPvTy = (hasRepTc, repTc)
 
 -- TODO: replace hasRepTc and repTc in LamOps by hasRepMethodF applied to them.
 
-type HasRepMeth = DynFlags -> ModGuts -> Type -> InScopeEnv -> Maybe (Id -> CoreExpr)
+type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
 hasRepMethodM :: (TyCon,TyCon) -> CoreM HasRepMeth
 hasRepMethodM (hasRepTc,repTc) =
   do hscEnv <- getHscEnv
      eps    <- liftIO (hscEPS hscEnv)
-     return $ \ dflags guts ty inScope ->
+     return $ \ dflags guts inScope ty ->
        let (mkEqBox -> eq,ty') =
              normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
                            Nominal (mkTyConApp repTc [ty])
            mfun :: CoreExpr -> Id -> CoreExpr
            mfun dict = pprTrace "hasRepMeth dict" (ppr dict) $
                        \ meth -> pprTrace "hasRepMeth meth" (ppr meth) $
-                                 varApps meth [ty] [dict,Type ty',eq]
+                                 -- varApps meth [ty,ty'] [dict,eq]
+                                 varApps meth [ty] [dict]
        in
          pprTrace "hasRepMeth ty" (ppr ty) $
          mfun <$> buildDictionary hscEnv dflags guts inScope (mkTyConApp hasRepTc [ty])
