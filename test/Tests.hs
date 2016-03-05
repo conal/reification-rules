@@ -1,14 +1,16 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-
-{-# LANGUAGE FlexibleContexts #-}  -- gro
+{-# LANGUAGE CPP, ScopedTypeVariables, LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}  -- go
 
 -- For Pair (to remove)
 {-# LANGUAGE TypeFamilies #-}
 
+-- For HR experiment
+{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances #-}
+
 {-# OPTIONS_GHC -Wall #-}
 
 {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
--- {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
+{-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
 
 ----------------------------------------------------------------------
 -- |
@@ -33,6 +35,9 @@ import ReificationRules.Run (run,Okay)
 import Circat.Doubli
 
 import Circat.Pair  -- TEMP
+import Circat.RTree  -- TEMP
+
+import qualified Circat.Rep as R -- TEMP
 
 -- TEMP
 
@@ -74,11 +79,27 @@ import Circat.Pair  -- TEMP
 
 main :: IO ()
 
--- main = go "foo" foo
+-- main = print (toE (reifyP (abst :: (Int,Int) -> Pair Int)))
+
+main = print (toE (reifyP (3 :# 5 :: Pair Int)))
+
+-- main = print (toE (reifyP (\ case a :# b -> a + b :: Int)))
+
+-- main = print ((abst (5,6) :: Pair Int), (repr (7 :# 8) :: (Int,Int)))
+
+-- main = print ((abst'' (5,6) :: Pair Int), (repr'' (7 :# 8) :: (Int,Int)))
+
+-- main = print (abst (repr (5 :# 6)) :: Pair Int)
+
+-- main = go "foo" (abst (repr (5 :# 6)) :: Pair Int)
+
+-- main = go "foo" (abst (5,6) :: Pair Int)
+
 -- main = print (toE foo)
 
-main = go "foo" (\ (x :: Int) y -> x > y + 3)
+-- main = go "foo" (\ (x :: Int) y -> x > y + 3)
 
+#if 1
 {--------------------------------------------------------------------
     Running
 --------------------------------------------------------------------}
@@ -92,3 +113,50 @@ go :: Okay a => String -> a -> IO ()
 go = error "go -- oops"
 {-# NOINLINE go #-}
 
+#endif
+
+{--------------------------------------------------------------------
+    other experiments
+--------------------------------------------------------------------}
+
+scrutinee :: R.HasRep a => a -> a
+scrutinee = id
+{-# NOINLINE scrutinee #-}
+
+{-# RULES
+
+"scrutinee Pair" forall p. scrutinee p = case repr p of (a,b) -> a :# b
+
+"scrutinee RTree Z" forall t. scrutinee t = L (repr t)
+"scrutinee RTree S" forall t. scrutinee t = B (repr t)
+
+-- "reify :#" forall a b. reifyP (a :# b) = reifyP (abst (a,b))
+
+"reify :#" reifyP (:#) = reifyP (\ a b -> abst (a,b))
+
+-- TODO: Move the RHS reification elsewhere so it happens only once.
+
+-- "reify case P" forall p f.
+--   reifyP (case p of { a :# b -> f a b }) = reifyP (case repr p of { (a,b) -> f a b })
+
+ #-}
+
+#if 0
+class HR a r | a -> r where
+  abst' :: r -> a
+  repr' :: a -> r
+
+instance HR (Pair a) (a,a) where
+  abst' (a,b) = (a :# b)
+  repr' (a :# b) = (a,b)
+
+abst'' :: HR a r => r -> a
+repr'' :: HR a r => a -> r
+
+abst'' = abst'
+repr'' = repr'
+
+{-# NOINLINE abst'' #-}
+{-# NOINLINE repr'' #-}
+
+#endif

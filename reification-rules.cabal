@@ -30,7 +30,9 @@ Library
                   , hermit >= 1.0.0.1
                   , circat
 
--- I only use hermit for BuildDictionary. Try to drop the dependency.
+-- TODO: drop ty, and use Data.Type.Equality
+
+-- I only use hermit for initTcFromModGuts. Try to drop the dependency.
 
   Exposed-Modules:
                     ReificationRules.Misc
@@ -39,6 +41,7 @@ Library
                     ReificationRules.Exp
                     ReificationRules.HOS
                     ReificationRules.BuildDictionary
+                    ReificationRules.Simplify
                     ReificationRules.Plugin
                     ReificationRules.MonoPrims
                     ReificationRules.ToCCC

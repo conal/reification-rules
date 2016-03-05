@@ -10,7 +10,7 @@ go: Tests Makefile ../dist
 
 GhcFlags += -dcore-lint
 GhcFlags += -fforce-recomp
-# GhcFlags += -ddump-simpl
+GhcFlags += -ddump-simpl
 # GhcFlags += -ddump-simpl-iterations
 
 # GhcFlags += -dshow-passes
@@ -25,14 +25,25 @@ GhcFlags += -dsuppress-uniques
 
 # GhcFlags += -dsuppress-all
 
-GhcFlags += -ddump-rule-rewrites
+# GhcFlags += -ddump-rule-rewrites
+
+GhcFlags += -ddump-rules
+
 # GhcFlags += -ddump-rule-firings
 # GhcFlags += -ddump-simpl-trace
 
 # GhcFlags += -dverbose-core2core
 
+GhcFlags += -fprint-explicit-kinds -fprint-equality-relations
+
 Tests: ../dist Tests.hs Makefile
-	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) Tests 
+	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
+
+RuleTest: ../dist RuleTest.hs Makefile
+	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
+
+RT: ../dist RT.hs Makefile
+	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
 
 # -ddump-rule-rewrites
 
@@ -51,6 +62,6 @@ HI_DIR = ../dist/build/ReificationRules
 %.iface: $(HI_DIR)/%.hi
 	$(ghc) --show-iface $(HI_DIR)/$*.hi > $*.iface
 
-ifaces: Run.iface
+ifaces: HOS.iface
 
 

@@ -87,4 +87,6 @@ class Eq1' f where
 a ===? b | a ==== b  = unsafeCoerce (Just Refl)
          | otherwise = Nothing
 
+-- TODO: Explore replacing Eq1' by TestEquality from Data.Type.Equality
+
 -- TODO: Maybe eliminate Eq' and ==?. If so, rename (====) and (===?).

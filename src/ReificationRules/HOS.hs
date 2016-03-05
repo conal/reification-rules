@@ -1,5 +1,9 @@
-{-# LANGUAGE CPP, GADTs, KindSignatures, ExplicitForAll, ConstraintKinds, MagicHash #-}
+{-# LANGUAGE CPP, GADTs, KindSignatures, ExplicitForAll, ConstraintKinds, MagicHash, TypeOperators #-}
 {-# OPTIONS_GHC -Wall #-}
+
+-- Prevent warnings about inlining fst, snd, not, etc.
+-- Might be worthwhile to turn back on and inspect warnings occasionally.
+{-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
 
 -- #define Testing
 
@@ -23,14 +27,15 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.HOS
-  ( EP,toE,appP,lamP,reifyP,evalP,constP,abst,repr,abstP,reprP
+  ( EP,toE,appP,lamP,reifyP,evalP,constP
+  , abst,repr,abst',repr', abstP,reprP, abstReprScrut 
   ) where
 
 -- TODO: explicit exports
 
 import Data.Map
 
-import GHC.Types
+import GHC.Types (type (~~),Int(..))
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
@@ -130,22 +135,46 @@ constP = constE'
 -- abst :: HasRep a => Rep a -> a
 -- repr :: HasRep a => a -> Rep a
 
-abst :: (HasRep a, Rep a ~ a') => a' -> a
-abst = Rep.abst
+abst :: (HasRep a, Rep a ~~ a') => a' -> a
+repr :: (HasRep a, Rep a ~~ a') => a -> a'
 
-repr :: (HasRep a, Rep a ~ a') => a -> a'
+abst = Rep.abst
 repr = Rep.repr
+
+{-# NOINLINE abst #-}
+{-# NOINLINE repr #-}
+
+-- abst' :: HasRep a => Rep a -> a
+-- repr' :: HasRep a => a -> Rep a
+
+abst' :: (HasRep a, Rep a ~~ a') => a' -> a
+repr' :: (HasRep a, Rep a ~~ a') => a -> a'
+
+abst' = Rep.abst
+repr' = Rep.repr
 
 -- I don't know why, but I was unable to find AbstP or ReprP from Plugin.
 
 -- abstP :: HasRep a => EP (Rep a -> a)
 -- reprP :: HasRep a => EP (a -> Rep a)
 
-abstP :: (HasRep a, Rep a ~ a') => EP (a' -> a)
-abstP = constP AbstP
+abstP :: (HasRep a, Rep a ~~ a') => EP (a' -> a)
+reprP :: (HasRep a, Rep a ~~ a') => EP (a -> a')
 
-reprP :: (HasRep a, Rep a ~ a') => EP (a -> a')
+abstP = constP AbstP
 reprP = constP ReprP
+
+-- Probably move elsewhere
+
+abstReprScrut :: HasRep a => a -> a
+abstReprScrut a = abst' (repr a)
+
+-- abstReprScrut a = Rep.abst (repr a)
+
+
+-- abstReprd :: a -> a
+-- abstReprd = id
+-- {-# NOINLINE abstReprd #-} -- for now
 
 {--------------------------------------------------------------------
     Rules
@@ -158,12 +187,12 @@ litE = constP . LitP . toLit
 
 "reifyP . evalP" forall e. reifyP (evalP e) = e
 
--- "reify abst" reifyP abst = constP AbstP
--- "reify repr" reifyP repr = constP ReprP
+"reify abst" reifyP abst = constP AbstP
+"reify repr" reifyP repr = constP ReprP
 
--- I don't know why these rules don't fire.
-"reify abst" reifyP abst = abstP
-"reify repr" reifyP repr = reprP
+-- -- I don't know why these rules don't fire.
+-- "reify abst" reifyP abst = abstP
+-- "reify repr" reifyP repr = reprP
 
 "reifyP not"  reifyP not  = constP NotP
 "reifyP (&&)" reifyP (&&) = constP AndP

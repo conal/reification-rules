@@ -16,7 +16,7 @@
 -- Adaptation of HERMIT's buildDictionaryT
 ----------------------------------------------------------------------
 
-module ReificationRules.BuildDictionary where
+module ReificationRules.BuildDictionary (buildDictionary,mkEqBox) where
 
 -- TODO: explicit exports
 
@@ -36,6 +36,8 @@ import           TcRnMonad (getCtLocM)
 import           TcRnTypes (cc_ev)
 import TcSMonad (runTcS)
 import TcEvidence (evBindMapBinds)
+import TysWiredIn (heqDataCon)
+import Pair (Pair(..))
 #else
 import           TcRnMonad (getCtLoc)
 #endif
@@ -118,3 +120,44 @@ stringToName :: String -> Name
 stringToName str =
   mkSystemVarName (mkUniqueGrimily (fromIntegral (hashString str)))
                   (mkFastString str)
+
+#if __GLASGOW_HASKELL__ > 710 
+
+-- Modified definition from GHC 7.8.2:
+-- This take a ~# b (or a ~# R b) and returns a ~ b (or Coercible a b)
+mkEqBox :: Coercion -> CoreExpr
+mkEqBox co = -- ASSERT2( typeKind ty2 `eqKind` k, ppr co $$ ppr ty1 $$ ppr ty2 $$ ppr (typeKind ty1) $$ ppr (typeKind ty2) )
+             Var (dataConWorkId datacon) `mkTyApps` [k1, k2, ty1, ty2] `App` Coercion co
+  where Pair ty1 ty2 = coercionKind co
+        k1 = typeKind ty1
+        k2 = typeKind ty2
+        datacon = case coercionRole co of 
+            Nominal ->          heqDataCon
+            Representational -> coercibleDataCon
+            Phantom ->          pprPanic "mkEqBox does not support boxing phantom coercions"
+                                         (ppr co)
+
+-- (~~) :: forall k1 k2. k1 -> k2 -> Constraint
+
+-- Adapted from mkHEqBoxTy in GHC's Inst module
+
+-- -- | This takes @a ~# b@ and returns @a ~~ b@.
+-- mkHEqBoxTy :: Coercion -> Type -> Type -> Type
+-- mkHEqBoxTy co ty1 ty2 =
+--   mkTyConApp (promoteDataCon heqDataCon)
+--              [typeKind ty1, typeKind ty2, ty1, ty2, mkCoercionTy co]
+
+#if 0
+
+-- | This takes @a ~# b@ and returns @a ~ b@.
+mkEqBoxTy :: Coercion -> Type -> Type -> TcM Type
+mkEqBoxTy co ty1 ty2
+  = do { eq_tc <- tcLookupTyCon eqTyConName
+       ; let [datacon] = tyConDataCons eq_tc
+       ; hetero <- mkHEqBoxTy co ty1 ty2
+       ; return $ mkTyConApp (promoteDataCon datacon) [k, ty1, ty2, hetero] }
+  where k = typeKind ty1
+
+#endif
+
+#endif
