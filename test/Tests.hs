@@ -81,9 +81,9 @@ main :: IO ()
 
 -- main = print (toE (reifyP (abst :: (Int,Int) -> Pair Int)))
 
-main = print (toE (reifyP (3 :# 5 :: Pair Int)))
+-- main = print (toE (reifyP (3 :# 5 :: Pair Int)))
 
--- main = print (toE (reifyP (\ case a :# b -> a + b :: Int)))
+main = print (toE (reifyP (\ case a :# b -> a + b :: Int)))
 
 -- main = print ((abst (5,6) :: Pair Int), (repr (7 :# 8) :: (Int,Int)))
 
@@ -119,6 +119,8 @@ go = error "go -- oops"
     other experiments
 --------------------------------------------------------------------}
 
+#if 0
+
 scrutinee :: R.HasRep a => a -> a
 scrutinee = id
 {-# NOINLINE scrutinee #-}
@@ -140,6 +142,8 @@ scrutinee = id
 --   reifyP (case p of { a :# b -> f a b }) = reifyP (case repr p of { (a,b) -> f a b })
 
  #-}
+
+#endif
 
 #if 0
 class HR a r | a -> r where
