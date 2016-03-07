@@ -65,7 +65,6 @@ data LamOps = LamOps { appV           :: Id
                      , reprPV         :: Id
                      , abstReprScrutV :: Id
                      , hasRepMeth     :: HasRepMeth
-                  -- , genHasRep      :: GenHasRep
                      , inlineV        :: Id                 -- probably drop
                      , fstV :: Id
                      , sndV :: Id
@@ -113,12 +112,13 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
        -- return $ letP v (tryReify rhs) (tryReify e)
        tryReify (Lam v e `App` rhs)
      Case scrut v _ [(DataAlt dc, [a,b], rhs)]
-         | isDeadBinder v, isBoxedTupleTyCon (dataConTyCon dc) ->
-       tryReify (mkLets [ NonRec v scrut
-                        , NonRec a (varApps fstV tys [Var v]) 
-                        , NonRec b (varApps sndV tys [Var v]) ] rhs)
+         | isBoxedTupleTyCon (dataConTyCon dc) ->
+       tryReify (mkLets [ NonRec v' scrut
+                        , NonRec a (varApps fstV tys [Var v']) 
+                        , NonRec b (varApps sndV tys [Var v']) ] rhs)
       where
         tys = varType <$> [a,b]
+        v' = zapIdOccInfo v
      (repMeth <+ traceRewrite "abstReprCase" abstReprCase -> Just e) -> Just e
      -- Other applications
      App u v | not (isTyCoArg v)
@@ -149,26 +149,6 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
    abstReprCase :: ReExpr
-#if 0
-   abstReprCase (Case scrut v altsTy alts) =
-     wrap <$> genHasRep dflags guts inScope ty
-    where
-      -- I'd really like to float the 'repr scrut' out before simplifying. The
-      -- catch is that I'd then have to somehow have to construct the repr
-      -- *method*, including the ~, which I've not managed. Idea: add a
-      -- 'simplify' identity pseudo-function with a rule attached, and use it in
-      -- abstReprScrut in HOS.
-      ty = varType v
-      -- I moved the simplifyE to outside of the case, rather than just the
-      -- scrutinee, in the hopes of getting case-of-case.
-      wrap :: Unop CoreExpr
-      wrap hrDict = mkReify $
-                    traceUnop "simplify case" (simplifyE dflags False) $
-                    Case scrut' v altsTy alts
-       where
-         scrut' = traceUnop "simplify scrutinee" (simplifyE dflags True) $
-                  varApps abstReprScrutV [ty] [hrDict,scrut]
-#elif 1
    abstReprCase (Case scrut v altsTy alts) =
      wrap <$> hasRepMeth dflags guts inScope (exprType scrut)
     where
@@ -182,18 +162,6 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
          scrut'    = traceUnop "simplify scrutinee" (simplifyE dflags True) $
                      App (meth abst'V) (Var v')  -- abst' is inlinable. could use Rep.abst
          v' = zapIdOccInfo $ uniqAway (fst inScope) v `setIdType` exprType reprScrut
-#else
-   abstReprCase (Case scrut v altsTy alts) | not (isAbstReprd scrut) = -- *
-     mkReify . wrap <$> hasRepMeth dflags guts inScope (exprType scrut)
-    where
-      wrap :: (Id -> CoreExpr) -> CoreExpr
-      -- wrap meth = Case (App (inlined (meth abstV)) (App (meth reprV) scrut)) v altsTy alts
-      wrap meth = Let (NonRec v' reprScrut) $
-                  Case (App (abstReprd (inlined (meth abstV))) (Var v')) v altsTy alts
-       where
-         reprScrut = App (meth reprV) scrut
-         v' = zapIdOccInfo $ uniqAway (fst inScope) v `setIdType` exprType reprScrut
-#endif
    abstReprCase _ = Nothing
    inlined :: Unop CoreExpr
    inlined e = varApps inlineV [exprType e] [e]
@@ -286,15 +254,6 @@ stdMethMap = M.fromList $
    opName cls ty op prim | ty == "Int" && cls `elem` ["Eq","Ord"] =
                              onHead toLower prim ++ "Int"
                          | otherwise = printf "$f%s%s_$c%s" cls ty op
-
-#if 0
--- Generate code for MonoPrims
-monoPrimDefs :: String
-monoPrimDefs = unlines
-  [ printf "%-7s = %6sP :: Prim (%-6s %-6s)" pat prim tyOp ty
-  | (_cls,tyOp,tys,ps) <- stdClassOpInfo, ty <- tys
-  , (_op,prim) <- ps, let pat = primAt prim ty ]
-#endif
 
 {--------------------------------------------------------------------
     Plugin installation
@@ -394,7 +353,6 @@ repTcsFromAbstPTy abstPvTy = -- pprTrace "repTcsFromAbstPTy. eqTy" (ppr eqTy) $
    Just [_ka, _ka',repATy,_] = tyConAppArgs_maybe eqTy
    Just repTc                = tyConAppTyCon_maybe repATy
 
-#if 1
 type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
 hasRepMethodM :: (TyCon,TyCon) -> CoreM HasRepMeth
@@ -413,18 +371,6 @@ hasRepMethodM (hasRepTc,repTc) =
        in
          -- pprTrace "hasRepMeth ty" (ppr ty) $
          mfun <$> buildDictionary hscEnv dflags guts inScope (mkTyConApp hasRepTc [ty])
-
--- I could include hscEnv and eps in LamOps.
-#else
-type GenHasRep = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe CoreExpr
-
-genHasRepM :: (TyCon,TyCon) -> CoreM GenHasRep
-genHasRepM (hasRepTc,_repTc) =
-  do hscEnv <- getHscEnv
-     return $ \ dflags guts inScope ty ->
-       buildDictionary hscEnv dflags guts inScope (mkTyConApp hasRepTc [ty])
-
-#endif
 
 {--------------------------------------------------------------------
     Misc
@@ -446,7 +392,7 @@ qualifiedName nm = modStr ++ getOccString nm
 
 -- | Substitute new subexpressions for variables in an expression
 subst :: [(Id,CoreExpr)] -> Unop CoreExpr
-subst ps = substExpr (error "subst: no SDoc") (foldr add emptySubst ps)
+subst ps = substExpr (text "subst") (foldr add emptySubst ps)
  where
    add (v,new) sub = extendIdSubst sub v new
 
