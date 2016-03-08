@@ -3,7 +3,7 @@
 
 -- Prevent warnings about inlining fst, snd, not, etc.
 -- Might be worthwhile to turn back on and inspect warnings occasionally.
-{-# OPTIONS_GHC -Wno-inline-rule-shadowing #-}
+{-# OPTIONS_GHC -fno-warn-inline-rule-shadowing #-}
 
 -- #define Testing
 
@@ -46,6 +46,7 @@ import qualified Circat.Rep as Rep
 import Circat.Rep (HasRep,Rep)
 
 import Circat.Doubli
+-- import Circat.Pair (Pair(..)) -- TEMP
 
 import ReificationRules.Exp
 import ReificationRules.Prim
@@ -211,6 +212,13 @@ litE = constP . LitP . toLit
 -- TODO: Drop Doubli, and use
 -- 
 -- "reifyP D#" forall n. reifyP (D# n) = litE (D# n)
+
+-- "reifyP :#" forall x y. reifyP (x :# y) = reifyP (abst (x,y))
+
+-- "reifyP :#" reifyP (:#) = reifyP (\ x y -> abst (x,y))
+
+-- TODO: Move the RHS reification elsewhere so it happens only once.
+
 
   #-}
 
