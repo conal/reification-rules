@@ -154,14 +154,7 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
     where
       wrap :: (Id -> CoreExpr) -> CoreExpr
       wrap meth = mkReify $             -- TODO: tryReify
-                  Let (NonRec v' reprScrut) $
-                  -- traceUnop "simplify case" (simplifyE dflags False) $ -- for case-of-case
-                  Case scrut' v altsTy alts
-       where
-         reprScrut = App (meth reprV) scrut
-         scrut'    = -- traceUnop "simplify scrutinee" (simplifyE dflags True) $
-                     App (meth abst'V) (Var v')  -- abst' is inlinable. could use Rep.abst
-         v' = zapIdOccInfo $ uniqAway (fst inScope) v `setIdType` exprType reprScrut
+                  Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
    abstReprCase _ = Nothing
    inlined :: Unop CoreExpr
    inlined e = varApps inlineV [exprType e] [e]
