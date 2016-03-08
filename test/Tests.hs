@@ -34,8 +34,10 @@ import ReificationRules.Run (run,Okay)
 
 import Circat.Doubli
 
-import Circat.Pair  -- TEMP
-import Circat.RTree  -- TEMP
+-- TEMP
+import TypeUnary.TyNat
+import Circat.Pair
+import Circat.RTree
 
 import qualified Circat.Rep as R -- TEMP
 
@@ -85,6 +87,8 @@ main :: IO ()
 
 main = print (toE (reifyP (\ case a :# b -> a + b :: Int)))
 
+-- main = print (toE (reifyP ((\ case L a -> a) :: Tree N0 Int -> Int)))
+
 -- main = print ((abst (5,6) :: Pair Int), (repr (7 :# 8) :: (Int,Int)))
 
 -- main = print ((abst'' (5,6) :: Pair Int), (repr'' (7 :# 8) :: (Int,Int)))
@@ -131,12 +135,6 @@ scrutinee = id
 
 "scrutinee RTree Z" forall t. scrutinee t = L (repr t)
 "scrutinee RTree S" forall t. scrutinee t = B (repr t)
-
--- "reify :#" forall a b. reifyP (a :# b) = reifyP (abst (a,b))
-
-"reify :#" reifyP (:#) = reifyP (\ a b -> abst (a,b))
-
--- TODO: Move the RHS reification elsewhere so it happens only once.
 
 -- "reify case P" forall p f.
 --   reifyP (case p of { a :# b -> f a b }) = reifyP (case repr p of { (a,b) -> f a b })
