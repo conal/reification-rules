@@ -27,8 +27,8 @@ module ReificationRules.Plugin (plugin) where
 import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (guard)
-import Data.Maybe (fromMaybe)
-import Data.List (stripPrefix)
+import Data.Maybe (fromMaybe,isJust)
+import Data.List (stripPrefix,isPrefixOf,isSuffixOf)
 import Data.Char (toLower)
 import qualified Data.Map as M
 import Text.Printf (printf)
@@ -149,24 +149,34 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
    abstReprCase :: ReExpr
-   abstReprCase (Case scrut v altsTy alts) =
+   abstReprCase (Case scrut v altsTy alts) | not (alreadyAbstReprd scrut) =
      wrap <$> hasRepMeth dflags guts inScope (exprType scrut)
     where
       wrap :: (Id -> CoreExpr) -> CoreExpr
       wrap meth = mkReify $             -- TODO: tryReify
                   Let (NonRec v' reprScrut) $
-                  traceUnop "simplify case" (simplifyE dflags False) $ -- for case-of-case
+                  -- traceUnop "simplify case" (simplifyE dflags False) $ -- for case-of-case
                   Case scrut' v altsTy alts
        where
          reprScrut = App (meth reprV) scrut
-         scrut'    = traceUnop "simplify scrutinee" (simplifyE dflags True) $
+         scrut'    = -- traceUnop "simplify scrutinee" (simplifyE dflags True) $
                      App (meth abst'V) (Var v')  -- abst' is inlinable. could use Rep.abst
          v' = zapIdOccInfo $ uniqAway (fst inScope) v `setIdType` exprType reprScrut
    abstReprCase _ = Nothing
    inlined :: Unop CoreExpr
    inlined e = varApps inlineV [exprType e] [e]
 
--- * Maybe check for inline instead.
+-- Don't do abstReprCase, since it's been done already. Check the outer function
+-- being applied to see whether it's abst', $fHasRepFoo_$cabst (for some Foo),
+-- or is a constructor worker or wrapper.
+alreadyAbstReprd :: CoreExpr -> Bool
+alreadyAbstReprd (collectArgs -> (Var v, _)) =
+     name == "abst'"
+  || ("$fHasRep" `isPrefixOf` name && "_$cabst" `isSuffixOf` name)
+  || isJust (isDataConId_maybe v)
+ where
+   name = uqVarName v
+alreadyAbstReprd _ = False
 
 infixl 3 <+
 (<+) :: Binop (Rewrite a)
