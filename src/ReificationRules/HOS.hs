@@ -28,7 +28,7 @@
 
 module ReificationRules.HOS
   ( EP,toE,appP,lamP,reifyP,evalP,constP
-  , abst,repr,abst',repr', abstP,reprP, abstReprScrut 
+  , abst,repr,abst',repr', abstP,reprP -- , abstReprScrut 
   ) where
 
 -- TODO: explicit exports
@@ -46,7 +46,9 @@ import qualified Circat.Rep as Rep
 import Circat.Rep (HasRep,Rep)
 
 import Circat.Doubli
--- import Circat.Pair (Pair(..)) -- TEMP
+import Circat.Pair (Pair(..)) -- TEMP
+import qualified Circat.RTree as R
+import qualified Circat.LTree as L
 
 import ReificationRules.Exp
 import ReificationRules.Prim
@@ -167,8 +169,8 @@ reprP = constP ReprP
 
 -- Probably move elsewhere
 
-abstReprScrut :: HasRep a => a -> a
-abstReprScrut a = abst' (repr a)
+-- abstReprScrut :: HasRep a => a -> a
+-- abstReprScrut a = abst' (repr a)
 
 -- abstReprScrut a = Rep.abst (repr a)
 
@@ -215,7 +217,13 @@ litE = constP . LitP . toLit
 
 -- "reifyP :#" forall x y. reifyP (x :# y) = reifyP (abst (x,y))
 
--- "reifyP :#" reifyP (:#) = reifyP (\ x y -> abst (x,y))
+"reifyP :#" reifyP (:#) = reifyP (\ x y -> abst (x,y))
+
+"reify RTree.L"  reifyP R.L    = abstP
+"reify RTree.B"  reifyP R.B    = abstP
+
+"reify LTree.L"  reifyP L.L    = abstP
+"reify LTree.B"  reifyP L.B    = abstP
 
 -- TODO: Move the RHS reification elsewhere so it happens only once.
 
