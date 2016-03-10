@@ -63,9 +63,9 @@ data LamOps = LamOps { appV           :: Id
                      , repr'V         :: Id
                      , abstPV         :: Id
                      , reprPV         :: Id
-                     , abstReprScrutV :: Id
+--                      , abstReprScrutV :: Id
                      , hasRepMeth     :: HasRepMeth
-                     , inlineV        :: Id                 -- probably drop
+                     , inlineV        :: Id
                      , fstV :: Id
                      , sndV :: Id
                      }
@@ -111,6 +111,7 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
      Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
        -- return $ letP v (tryReify rhs) (tryReify e)
        tryReify (Lam v e `App` rhs)
+     e@(Case (Case {}) _ _ _) -> tryReify (simplifyE dflags False e)
      Case scrut v _ [(DataAlt dc, [a,b], rhs)]
          | isBoxedTupleTyCon (dataConTyCon dc) ->
        tryReify (mkLets [ NonRec v' scrut
@@ -119,7 +120,15 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
       where
         tys = varType <$> [a,b]
         v' = zapIdOccInfo v
-     (repMeth <+ traceRewrite "abstReprCase" abstReprCase -> Just e) -> Just e
+     Case scrut v altsTy alts
+       | not (alreadyAbstReprd scrut)
+       , Just meth <- hasRepMeth dflags guts inScope (exprType scrut)
+       -> tryReify $
+          Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
+       | (Var f, args) <- collectArgs scrut, hasUnfolding f
+       -> tryReify $ Case (inlined (Var f) `mkApps` args) v altsTy alts
+     -- (repMeth <+ traceRewrite "abstReprCase" abstReprCase -> Just e) -> Just e
+     (repMeth -> Just e) -> Just e
      -- Other applications
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
@@ -129,7 +138,7 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
    -- helpers
    stringExpr :: String -> CoreExpr
    stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
-   mkReify :: CoreExpr -> CoreExpr
+   mkReify :: Unop CoreExpr
    mkReify e = varApps reifyV [exprType e] [e]
    tryReify :: ReExpr
    -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
@@ -148,23 +157,34 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
+#if 0
    abstReprCase :: ReExpr
    abstReprCase (Case scrut v altsTy alts) | not (alreadyAbstReprd scrut) =
      wrap <$> hasRepMeth dflags guts inScope (exprType scrut)
     where
       wrap :: (Id -> CoreExpr) -> CoreExpr
-      wrap meth = mkReify $             -- TODO: tryReify
+      wrap meth = mkReify $
                   Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
    abstReprCase _ = Nothing
+#endif
    inlined :: Unop CoreExpr
-   inlined e = varApps inlineV [exprType e] [e]
+   inlined e = -- simplifyE dflags False $
+               varApps inlineV [exprType e] [e]
+
+hasUnfolding :: Id -> Bool
+hasUnfolding (uqVarName -> "inline") = False
+hasUnfolding (idUnfolding -> NoUnfolding) = False
+hasUnfolding _ = True
 
 -- Don't do abstReprCase, since it's been done already. Check the outer function
 -- being applied to see whether it's abst', $fHasRepFoo_$cabst (for some Foo),
 -- or is a constructor worker or wrapper.
+-- TODO: Rename this test. I think it's really about saying not to abstRepr.
 alreadyAbstReprd :: CoreExpr -> Bool
+-- alreadyAbstReprd (Case {}) = True
 alreadyAbstReprd (collectArgs -> (Var v, _)) =
      name == "abst'"
+  || name == "inline"
   || ("$fHasRep" `isPrefixOf` name && "_$cabst" `isSuffixOf` name)
   || isJust (isDataConId_maybe v)
  where
@@ -311,7 +331,7 @@ mkLamOps = do
   repr'V         <- findHosId "repr'"
   abstPV         <- findHosId "abstP"
   reprPV         <- findHosId "reprP"
-  abstReprScrutV <- findHosId "abstReprScrut"
+--   abstReprScrutV <- findHosId "abstReprScrut"
   inlineV        <- lookupRdr (mkModuleName "GHC.Exts") lookupId "inline"
   fstV           <- findTupleId "fst"
   sndV           <- findTupleId "snd"
