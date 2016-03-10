@@ -83,10 +83,10 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
 --                        . showsPrec 0 q . showString " -> " . showsPrec 0 a . showString " ; "
 --                        . showsPrec 0 r . showString " -> " . showsPrec 0 b . showString " } "
   -- TODO: Fix for beta-multi-redex
---   showsPrec p (Lam q body :^ rhs) =  -- beta redex as "let"
---     showParen (p > 0) $
---     showString "let " . showsPrec 0 q . showString " = " . showsPrec 0 rhs
---     . showString " in " . showsPrec 0 body
+  showsPrec p (Lam q body :^ rhs) =  -- beta redex as "let"
+    showParen (p > 0) $
+    showString "let " . showsPrec 0 q . showString " = " . showsPrec 0 rhs
+    . showString " in " . showsPrec 0 body
 #endif
   showsPrec p (ConstE prim :^ u :^ v) | Just (OpInfo op fixity) <- opInfo prim =
     showsOp2 False op fixity p u v
