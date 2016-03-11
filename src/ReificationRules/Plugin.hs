@@ -43,7 +43,7 @@ import TcType (isIntegerTy)
 import FamInstEnv (normaliseType)
 import SimplCore (simplifyExpr)
 
-import ReificationRules.Misc (Binop)
+import ReificationRules.Misc (Unop,Binop)
 import ReificationRules.BuildDictionary (buildDictionary,mkEqBox)
 import ReificationRules.Simplify (simplifyE)
 
@@ -63,9 +63,7 @@ data LamOps = LamOps { appV           :: Id
                      , repr'V         :: Id
                      , abstPV         :: Id
                      , reprPV         :: Id
---                      , abstReprScrutV :: Id
                      , hasRepMeth     :: HasRepMeth
-                     , inlineV        :: Id
                      , fstV :: Id
                      , sndV :: Id
                      }
@@ -73,34 +71,48 @@ data LamOps = LamOps { appV           :: Id
 -- TODO: drop reifyV, since it's in the rule
 -- TODO: drop unpackV, since I'll probably replace String by Addr# for names.
 
-#define Tracing
+tracing :: Bool
+tracing = False -- True
+
+dtrace :: String -> SDoc -> a -> a
+dtrace str doc | tracing   = pprTrace str doc
+               | otherwise = id
 
 pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
-#ifdef Tracing
-pprTrans str a b = pprTrace str (ppr a <+> text "-->" <+> ppr b) b
-#else
-pprTrans _ _ b = b
-#endif
+pprTrans str a b = dtrace str (ppr a <+> text "-->" <+> ppr b) b
 
-traceUnop :: (Outputable a, Outputable b) =>
-             String -> Unop (a -> b)
+traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
 traceUnop str f a = pprTrans str a (f a)
 
 traceRewrite :: (Outputable a, Outputable b, Functor f) =>
                 String -> Unop (a -> f b)
 traceRewrite str f a = pprTrans str a <$> f a
 
+recursively :: Bool
+recursively = True -- False
+
 type Rewrite a = a -> Maybe a
 type ReExpr = Rewrite CoreExpr
 
 reify :: LamOps -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
-reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
+reify (LamOps {..}) guts dflags inScope = traceRewrite "reify go"
                                           go
  where
    go :: ReExpr
    go = \ case 
      e | pprTrace "reify go:" (ppr e) False -> undefined
      Var v | j@(Just _) <- primFun v -> j
+#if 0
+     -- This time, make a beta-redex instead of substituting.
+     -- f --> lamP (\ y -> reifyP (f (eval y)))
+     f@(Lam x body) | not (isTyVar x) ->
+       do e' <- tryReify (f `App` varApps evalV [xty] [Var y])
+          return $ varApps lamV [xty, exprType body]
+                     [stringExpr (uqVarName y), Lam y e']
+       where
+         xty = varType x
+         y   = setVarType x (exprType (mkReify (Var x))) -- *
+#else
      Lam x e | not (isTyVar x) ->
        do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
           return $ varApps lamV [xty, exprType e]
@@ -108,6 +120,7 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
        where
          xty = varType x
          y   = setVarType x (exprType (mkReify (Var x))) -- *
+#endif
      Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
        -- return $ letP v (tryReify rhs) (tryReify e)
        tryReify (Lam v e `App` rhs)
@@ -125,9 +138,8 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
        , Just meth <- hasRepMeth dflags guts inScope (exprType scrut)
        -> tryReify $
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
-       | (Var f, args) <- collectArgs scrut, hasUnfolding f
-       -> tryReify $ Case (inlined (Var f) `mkApps` args) v altsTy alts
-     -- (repMeth <+ traceRewrite "abstReprCase" abstReprCase -> Just e) -> Just e
+       | Just scrut' <- inlineMaybe scrut
+       -> tryReify $ Case scrut' v altsTy alts
      (repMeth -> Just e) -> Just e
      -- Other applications
      App u v | not (isTyCoArg v)
@@ -143,7 +155,7 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
    tryReify :: ReExpr
    -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
    -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
-   tryReify e | reifiableExpr e = go e <|> Just (mkReify e)
+   tryReify e | reifiableExpr e = (guard recursively >> go e) <|> Just (mkReify e)
               | otherwise = -- pprTrace "Not reifiable:" (ppr e)
                             Nothing
    repMeth :: ReExpr
@@ -157,19 +169,21 @@ reify (LamOps {..}) guts dflags inScope = -- traceRewrite "reify go"
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
-#if 0
-   abstReprCase :: ReExpr
-   abstReprCase (Case scrut v altsTy alts) | not (alreadyAbstReprd scrut) =
-     wrap <$> hasRepMeth dflags guts inScope (exprType scrut)
-    where
-      wrap :: (Id -> CoreExpr) -> CoreExpr
-      wrap meth = mkReify $
-                  Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
-   abstReprCase _ = Nothing
-#endif
+   -- Inline when possible.
    inlined :: Unop CoreExpr
-   inlined e = -- simplifyE dflags False $
-               varApps inlineV [exprType e] [e]
+   inlined e = fromMaybe e (inlineMaybe e)               
+
+onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
+onAppsFun h (collectArgs -> (Var f, args)) = (`mkApps` args) <$> h f
+onAppsFun _ _ = Nothing
+
+-- Inline application head, if possible.
+inlineMaybe :: ReExpr
+-- inlineMaybe = onAppsFun (maybeUnfoldingTemplate . realIdUnfolding)
+inlineMaybe = onAppsFun (traceRewrite "inline" $
+                         maybeUnfoldingTemplate . realIdUnfolding)
+
+-- See match_inline from PrelRules, as used with 'inline'.
 
 hasUnfolding :: Id -> Bool
 hasUnfolding (uqVarName -> "inline") = False
@@ -320,28 +334,24 @@ mkLamOps = do
       lookupHos   = lookupRdr (mkModuleName "ReificationRules.HOS")
       findHosId   = lookupHos lookupId
       findTupleId = lookupRdr (mkModuleName "Data.Tuple") lookupId
-  appV           <- findHosId "appP"
-  lamV           <- findHosId "lamP"
-  reifyV         <- findHosId "reifyP"
-  evalV          <- findHosId "evalP"
-  constV         <- findHosId "constP"
-  abstV          <- findHosId "abst"
-  reprV          <- findHosId "repr"
-  abst'V         <- findHosId "abst'"
-  repr'V         <- findHosId "repr'"
-  abstPV         <- findHosId "abstP"
-  reprPV         <- findHosId "reprP"
---   abstReprScrutV <- findHosId "abstReprScrut"
-  inlineV        <- lookupRdr (mkModuleName "GHC.Exts") lookupId "inline"
-  fstV           <- findTupleId "fst"
-  sndV           <- findTupleId "snd"
+  appV    <- findHosId "appP"
+  lamV    <- findHosId "lamP"
+  reifyV  <- findHosId "reifyP"
+  evalV   <- findHosId "evalP"
+  constV  <- findHosId "constP"
+  abstV   <- findHosId "abst"
+  reprV   <- findHosId "repr"
+  abst'V  <- findHosId "abst'"
+  repr'V  <- findHosId "repr'"
+  abstPV  <- findHosId "abstP"
+  reprPV  <- findHosId "reprP"
+  fstV    <- findTupleId "fst"
+  sndV    <- findTupleId "snd"
   primMap <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
                   stdMethMap
   let primFun v = (\ primId -> varApps constV [tyArg1 (idType primId)] [Var primId])
                   <$> M.lookup (uqVarName v) primMap
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
---   genHasRep <- genHasRepM (repTcsFromAbstTy (varType abst'V))
---                           -- (repTcsFromAbstPTy (varType abstPV))
   return (LamOps { .. })
  where
    -- Used to extract Prim tycon argument
@@ -401,8 +411,6 @@ hasRepMethodM (hasRepTc,repTc) =
 
 on_mg_rules :: Unop [CoreRule] -> Unop ModGuts
 on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
-
-type Unop a = a -> a
 
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
