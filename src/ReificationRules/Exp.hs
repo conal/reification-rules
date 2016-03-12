@@ -89,8 +89,11 @@ showsBind (p := e) = shows p . showString " = " . shows e
 showsBinds :: (Show' p, HasOpInfo p) => [Bind p] -> ShowS
 showsBinds [b] = showsBind b
 showsBinds bs = showString "{ "
-              . foldr1 (\ g f -> g . showString "; " . f) (map showsBind bs)
+              . intercalateShows (showString "; ") (map showsBind bs)
               . showString " }"
+
+intercalateShows :: Foldable f => ShowS -> f ShowS -> ShowS
+intercalateShows gap = foldr1 (\ g f -> g . gap . f)
 
 instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
 #ifdef Sugared
@@ -115,6 +118,7 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
   showsPrec p (Lam q e)     =
     showParen (p > 0) $
     showString "\\ " . shows q . showString " -> " . shows e
+
 --   showsPrec p (Either f g) = showsOp2' "|||" (2,AssocRight) p f g
 --   showsPrec p (Loop h) = showsApp1 "loop" p h
 --   showsPrec p (CoerceE e)  = showsApp1 "coerce" p e
