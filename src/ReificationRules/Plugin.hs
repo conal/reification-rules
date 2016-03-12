@@ -26,7 +26,7 @@ module ReificationRules.Plugin (plugin) where
 
 import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
-import Control.Monad (guard)
+import Control.Monad (guard,(<=<))
 import Data.Maybe (fromMaybe,isJust)
 import Data.List (stripPrefix,isPrefixOf,isSuffixOf)
 import Data.Char (toLower)
@@ -52,34 +52,37 @@ import ReificationRules.Simplify (simplifyE)
 --------------------------------------------------------------------}
 
 -- Reification operations
-data LamOps = LamOps { appV           :: Id
-                     , lamV           :: Id
-                     , reifyV         :: Id
-                     , evalV          :: Id
-                     , primFun        :: Id -> Maybe CoreExpr
-                     , abstV          :: Id
-                     , reprV          :: Id
-                     , abst'V         :: Id
-                     , repr'V         :: Id
-                     , abstPV         :: Id
-                     , reprPV         :: Id
-                     , hasRepMeth     :: HasRepMeth
-                     , fstV :: Id
-                     , sndV :: Id
+data LamOps = LamOps { appV       :: Id
+                     , lamV       :: Id
+                     , reifyV     :: Id
+                     , evalV      :: Id
+                     , primFun    :: Id -> Maybe CoreExpr
+                     , abstV      :: Id
+                     , reprV      :: Id
+                     , abst'V     :: Id
+                     , repr'V     :: Id
+                     , abstPV     :: Id
+                     , reprPV     :: Id
+                     , hasRepMeth :: HasRepMeth
+                     , fstV       :: Id
+                     , sndV       :: Id
                      }
 
 -- TODO: drop reifyV, since it's in the rule
 -- TODO: drop unpackV, since I'll probably replace String by Addr# for names.
 
+recursively :: Bool
+recursively = True -- False
+
 tracing :: Bool
-tracing = False -- True
+tracing = True -- False
 
 dtrace :: String -> SDoc -> a -> a
 dtrace str doc | tracing   = pprTrace str doc
                | otherwise = id
 
 pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
-pprTrans str a b = dtrace str (ppr a <+> text "-->" <+> ppr b) b
+pprTrans str a b = dtrace str (ppr a <+> text "-->" $$ ppr b) b
 
 traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
 traceUnop str f a = pprTrans str a (f a)
@@ -88,21 +91,26 @@ traceRewrite :: (Outputable a, Outputable b, Functor f) =>
                 String -> Unop (a -> f b)
 traceRewrite str f a = pprTrans str a <$> f a
 
-recursively :: Bool
-recursively = True -- False
-
 type Rewrite a = a -> Maybe a
 type ReExpr = Rewrite CoreExpr
 
 reify :: LamOps -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
-reify (LamOps {..}) guts dflags inScope = traceRewrite "reify go"
+reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
                                           go
  where
    go :: ReExpr
    go = \ case 
-     e | pprTrace "reify go:" (ppr e) False -> undefined
+     -- e | dtrace "reify go:" (ppr e) False -> undefined
      Var v | j@(Just _) <- primFun v -> j
-#if 0
+#if 1
+     Lam x e | not (isTyVar x) ->
+       do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
+          return $ varApps lamV [xty, exprType e]
+                     [stringExpr (uqVarName y), Lam y e']
+       where
+         xty = varType x
+         y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
+#else
      -- This time, make a beta-redex instead of substituting.
      -- f --> lamP (\ y -> reifyP (f (eval y)))
      f@(Lam x body) | not (isTyVar x) ->
@@ -112,19 +120,11 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify go"
        where
          xty = varType x
          y   = setVarType x (exprType (mkReify (Var x))) -- *
-#else
-     Lam x e | not (isTyVar x) ->
-       do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
-          return $ varApps lamV [xty, exprType e]
-                     [stringExpr (uqVarName y), Lam y e']
-       where
-         xty = varType x
-         y   = setVarType x (exprType (mkReify (Var x))) -- *
 #endif
      Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
        -- return $ letP v (tryReify rhs) (tryReify e)
        tryReify (Lam v e `App` rhs)
-     e@(Case (Case {}) _ _ _) -> tryReify (simplifyE dflags False e)
+     e@(Case (Case {}) _ _ _) -> tryReify (traceUnop "simplifyE" (simplifyE dflags False) e)
      Case scrut v _ [(DataAlt dc, [a,b], rhs)]
          | isBoxedTupleTyCon (dataConTyCon dc) ->
        tryReify (mkLets [ NonRec v' scrut
@@ -132,7 +132,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify go"
                         , NonRec b (varApps sndV tys [Var v']) ] rhs)
       where
         tys = varType <$> [a,b]
-        v' = zapIdOccInfo v
+        v'  = zapIdOccInfo v
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut)
        , Just meth <- hasRepMeth dflags guts inScope (exprType scrut)
@@ -141,6 +141,10 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify go"
        | Just scrut' <- inlineMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
      (repMeth -> Just e) -> Just e
+     -- (repMeth <+ (tryReify <=< inlineMaybe) -> Just e) -> Just e
+     -- reify (eval e) --> e.
+     -- TODO: Move into primFun
+     (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      -- Other applications
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
@@ -174,14 +178,28 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify go"
    inlined e = fromMaybe e (inlineMaybe e)               
 
 onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
-onAppsFun h (collectArgs -> (Var f, args)) = (`mkApps` args) <$> h f
+onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
 onAppsFun _ _ = Nothing
+
+-- simpleOptE :: Unop CoreExpr
+-- simpleOptE = traceUnop "simpleOptExpr" simpleOptExpr
 
 -- Inline application head, if possible.
 inlineMaybe :: ReExpr
--- inlineMaybe = onAppsFun (maybeUnfoldingTemplate . realIdUnfolding)
-inlineMaybe = onAppsFun (traceRewrite "inline" $
+
+inlineMaybe = traceRewrite "unfold" $
+              onAppsFun (-- traceRewrite "inline" $
                          maybeUnfoldingTemplate . realIdUnfolding)
+
+-- inlineMaybe = traceRewrite "unfold" $
+--               onAppsFun $ \ v ->
+--   let unf        = realIdUnfolding v
+--       templateMb = maybeUnfoldingTemplate unf
+--   in
+--     dtrace "inlineMaybe" (ppr v $$ text "realIdUnfolding =" <+> ppr unf
+--                                 $$ text "maybeUnfoldingTemplate =" <+> ppr templateMb)
+--      templateMb
+
 
 -- See match_inline from PrelRules, as used with 'inline'.
 
@@ -195,15 +213,17 @@ hasUnfolding _ = True
 -- or is a constructor worker or wrapper.
 -- TODO: Rename this test. I think it's really about saying not to abstRepr.
 alreadyAbstReprd :: CoreExpr -> Bool
--- alreadyAbstReprd (Case {}) = True
-alreadyAbstReprd (collectArgs -> (Var v, _)) =
-     name == "abst'"
-  || name == "inline"
-  || ("$fHasRep" `isPrefixOf` name && "_$cabst" `isSuffixOf` name)
-  || isJust (isDataConId_maybe v)
- where
-   name = uqVarName v
-alreadyAbstReprd _ = False
+alreadyAbstReprd (collectArgs -> (h,_)) =
+  case h of
+    Var  v   ->
+         name == "abst'"
+      || name == "inline"
+      || ("$fHasRep" `isPrefixOf` name && "_$cabst" `isSuffixOf` name)
+      || isJust (isDataConId_maybe v)
+     where
+       name = uqVarName v
+    Case {} -> True
+    _       -> False
 
 infixl 3 <+
 (<+) :: Binop (Rewrite a)
@@ -279,18 +299,25 @@ stdClassOpInfo =
 primAt :: String -> String -> String
 primAt prim ty = toLower (head ty) : prim
 
--- Map '$fNumInt_$c+' to 'primAddInt' etc (with module qualifiers)
+-- Map "$fNumInt_$c+" to MonoPrims names "iAdd" etc
 stdMethMap :: M.Map String String
 stdMethMap = M.fromList $
   [ (opName cls ty op prim, primAt prim ty)
   | (cls,_,tys,ps) <- stdClassOpInfo, ty <- tys, (op,prim) <- ps ]
+  ++
+  [ ("not","notP"), ("||","orP"), ("&&","andP")
+  , ("fst","exlP"), ("snd","exrP"), ("(,)","pairP")
+  ]
  where
    -- Unqualified method name, e.g., "$fNumInt_$c+".
    -- Eq & Ord for Int use "eqInt" etc.
    opName :: String -> String -> String -> String -> String
-   opName cls ty op prim | ty == "Int" && cls `elem` ["Eq","Ord"] =
-                             onHead toLower prim ++ "Int"
-                         | otherwise = printf "$f%s%s_$c%s" cls ty op
+   opName cls ty op prim
+     | ty == "Int" && cls `elem` ["Eq","Ord"] = onHead toLower prim ++ "Int"
+     | otherwise                              = printf "$f%s%s_$c%s" cls ty op
+
+-- If I give up on using a rewrite rule, then I can precede the first simplifier
+-- pass, so the built-in class op unfoldings don't have to fire first.
 
 {--------------------------------------------------------------------
     Plugin installation
