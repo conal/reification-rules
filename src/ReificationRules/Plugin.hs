@@ -63,9 +63,10 @@ data LamOps = LamOps { appV       :: Id
                      , repr'V     :: Id
                      , abstPV     :: Id
                      , reprPV     :: Id
-                     , hasRepMeth :: HasRepMeth
                      , fstV       :: Id
                      , sndV       :: Id
+                     , hasRepMeth :: HasRepMeth
+                     , hasLit     :: HasLit
                      }
 
 -- TODO: drop reifyV, since it's in the rule
@@ -382,6 +383,9 @@ mkLamOps = do
   let primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
                          <$> M.lookup (uqVarName v) primMap
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
+  toLitV <- findHosId "toLitE"
+  let hasLitTc = tcFromToLitETy (varType toLitV)
+  hasLit <- toLitM (hasLitTc,toLitV)
   return (LamOps { .. })
  where
    -- Used to extract Prim tycon argument
@@ -416,6 +420,14 @@ repTcsFromAbstPTy abstPvTy = -- pprTrace "repTcsFromAbstPTy. eqTy" (ppr eqTy) $
    Just [_ka, _ka',repATy,_] = tyConAppArgs_maybe eqTy
    Just repTc                = tyConAppTyCon_maybe repATy
 
+-- Extract HasLit TyCon from the type of toLitE
+tcFromToLitETy :: Type -> TyCon
+tcFromToLitETy toLitETy = tc
+ where
+   -- litE :: HasLit a => a -> EP a
+   (hasLitA,_) = splitFunTy (dropForAlls toLitETy)
+   Just tc = tyConAppTyCon_maybe hasLitA
+
 type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
 hasRepMethodM :: (TyCon,TyCon) -> CoreM HasRepMeth
@@ -433,7 +445,26 @@ hasRepMethodM (hasRepTc,repTc) =
                                  -- varApps meth [ty] [dict]
        in
          -- pprTrace "hasRepMeth ty" (ppr ty) $
-         mfun <$> buildDictionary hscEnv dflags guts inScope (mkTyConApp hasRepTc [ty])
+         mfun <$> buildDictionary hscEnv dflags guts inScope
+                    (mkTyConApp hasRepTc [ty])
+
+type HasLit = DynFlags -> ModGuts -> InScopeEnv -> ReExpr
+
+toLitM :: (TyCon,Id) -> CoreM HasLit
+toLitM (hasLitTc,toLitV) =
+  do hscEnv <- getHscEnv
+     return $ \ dflags guts inScope e ->
+       let ty = exprType e
+           lfun :: CoreExpr -> CoreExpr
+           lfun dict = dtrace "toLit" (ppr e) $
+                       varApps toLitV [ty] [dict,e]
+       in
+         lfun <$> buildDictionary hscEnv dflags guts inScope
+                    (mkTyConApp hasLitTc [ty])
+
+-- TODO: move the CoreM stuff hasRepMethodM and toLitM into calling code.
+
+-- TODO: refactor hasRepMethodM and toLitM.
 
 {--------------------------------------------------------------------
     Misc
