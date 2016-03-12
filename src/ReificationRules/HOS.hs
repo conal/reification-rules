@@ -29,13 +29,14 @@
 module ReificationRules.HOS
   ( EP,toE,appP,lamP,reifyP,evalP,constP
   , abst,repr,abst',repr', abstP,reprP -- , abstReprScrut 
+  , litE
   ) where
 
 -- TODO: explicit exports
 
 import Data.Map
 
-import GHC.Types (type (~~),Int(..))
+import GHC.Types (type (~~),Int(..))  -- ,Double(..)
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
@@ -45,7 +46,7 @@ import Circat.Misc (Unop,Binop,Ternop)
 import qualified Circat.Rep as Rep
 import Circat.Rep (HasRep,Rep)
 
-import Circat.Doubli
+-- import Circat.Doubli
 import Circat.Pair (Pair(..)) -- TEMP
 import qualified Circat.RTree as R
 import qualified Circat.LTree as L
@@ -167,18 +168,6 @@ reprP :: (HasRep a, Rep a ~~ a') => EP (a -> a')
 abstP = constP AbstP
 reprP = constP ReprP
 
--- Probably move elsewhere
-
--- abstReprScrut :: HasRep a => a -> a
--- abstReprScrut a = abst' (repr a)
-
--- abstReprScrut a = Rep.abst (repr a)
-
-
--- abstReprd :: a -> a
--- abstReprd = id
--- {-# NOINLINE abstReprd #-} -- for now
-
 {--------------------------------------------------------------------
     Rules
 --------------------------------------------------------------------}
@@ -188,7 +177,7 @@ litE = constP . LitP . toLit
 
 {-# RULES
 
-"reifyP . evalP" forall e. reifyP (evalP e) = e
+-- "reifyP . evalP" forall e. reifyP (evalP e) = e
 
 "reify abst" reifyP abst = constP AbstP
 "reify repr" reifyP repr = constP ReprP
@@ -197,36 +186,33 @@ litE = constP . LitP . toLit
 -- "reify abst" reifyP abst = abstP
 -- "reify repr" reifyP repr = reprP
 
-"reifyP not"  reifyP not  = constP NotP
-"reifyP (&&)" reifyP (&&) = constP AndP
-"reifyP (||)" reifyP (||) = constP OrP
+-- "reifyP not"  reifyP not  = constP NotP
+-- "reifyP (&&)" reifyP (&&) = constP AndP
+-- "reifyP (||)" reifyP (||) = constP OrP
 
-"reifyP fst" reifyP fst = constP ExlP
-"reifyP snd" reifyP snd = constP ExrP
-"reifyP (,)" reifyP (,) = constP PairP
+-- "reifyP fst" reifyP fst = constP ExlP
+-- "reifyP snd" reifyP snd = constP ExrP
+-- "reifyP (,)" reifyP (,) = constP PairP
 
-"reifyP True"  reifyP True  = litE True
-"reifyP False" reifyP False = litE False
+-- "reifyP True"  reifyP True  = litE True
+-- "reifyP False" reifyP False = litE False
 
-"reifyP I#" forall n. reifyP (I#     n) = litE (I# n)
-"reifyP D#" forall n. reifyP (Doubli n) = litE (Doubli n)
+-- "reifyP I#" forall n. reifyP (I#     n) = litE (I# n)
+-- "reifyP D#" forall n. reifyP (Doubli n) = litE (Doubli n)
 
--- TODO: Drop Doubli, and use
+-- -- TODO: Drop Doubli, and use Double:
 -- 
 -- "reifyP D#" forall n. reifyP (D# n) = litE (D# n)
 
--- "reifyP :#" forall x y. reifyP (x :# y) = reifyP (abst (x,y))
-
 "reifyP :#" reifyP (:#) = reifyP (\ x y -> abst (x,y))
 
-"reify RTree.L"  reifyP R.L    = abstP
-"reify RTree.B"  reifyP R.B    = abstP
+"reifyP :#" forall x y. reifyP (x :# y) = reifyP (abst (x,y))
 
-"reify LTree.L"  reifyP L.L    = abstP
-"reify LTree.B"  reifyP L.B    = abstP
+"reify RTree.L" reifyP R.L = abstP
+"reify RTree.B" reifyP R.B = abstP
 
--- TODO: Move the RHS reification elsewhere so it happens only once.
-
+"reify LTree.L" reifyP L.L = abstP
+"reify LTree.B" reifyP L.B = abstP
 
   #-}
 
