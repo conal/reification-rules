@@ -24,7 +24,7 @@
 
 module ReificationRules.Plugin (plugin) where
 
-import Control.Arrow (first)
+import Control.Arrow (first,second)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (guard,(<=<))
 import Data.Maybe (fromMaybe,isJust)
@@ -56,7 +56,7 @@ data LamOps = LamOps { appV       :: Id
                      , lamV       :: Id
                      , reifyV     :: Id
                      , evalV      :: Id
-                     , primFun    :: Id -> Maybe CoreExpr
+                     , primFun    :: PrimFun
                      , abstV      :: Id
                      , reprV      :: Id
                      , abst'V     :: Id
@@ -101,7 +101,6 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
    go :: ReExpr
    go = \ case 
      -- e | dtrace "reify go:" (ppr e) False -> undefined
-     Var v | j@(Just _) <- primFun v -> j
 #if 1
      Lam x e | not (isTyVar x) ->
        do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
@@ -141,6 +140,8 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
        | Just scrut' <- inlineMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
      (repMeth -> Just e) -> Just e
+     e@(collectTyArgs -> (Var v, tys))
+       | j@(Just _) <- primFun (exprType e) v tys -> j
      -- (repMeth <+ (tryReify <=< inlineMaybe) -> Just e) -> Just e
      -- reify (eval e) --> e.
      -- TODO: Move into primFun
@@ -347,6 +348,8 @@ install _opts todos =
      let pass guts = pure (on_mg_rules (rr guts :) guts)
      return $ CoreDoPluginPass "Reify insert rule" pass : todos
 
+type PrimFun = Type -> Id -> [Type] -> Maybe CoreExpr
+
 mkLamOps :: CoreM LamOps
 mkLamOps = do
   hsc_env <- getHscEnv
@@ -376,8 +379,8 @@ mkLamOps = do
   sndV    <- findTupleId "snd"
   primMap <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
                   stdMethMap
-  let primFun v = (\ primId -> varApps constV [tyArg1 (idType primId)] [Var primId])
-                  <$> M.lookup (uqVarName v) primMap
+  let primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
+                         <$> M.lookup (uqVarName v) primMap
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
   return (LamOps { .. })
  where
@@ -460,3 +463,9 @@ subst1 v e = subst [(v,e)]
 onHead :: Unop a -> Unop [a]
 onHead f (c:cs) = f c : cs
 onHead _ []     = []
+
+collectTyArgs :: CoreExpr -> (CoreExpr,[Type])
+collectTyArgs = go []
+ where
+   go tys (App e (Type ty)) = go (ty:tys) e
+   go tys e                 = (e,tys)
