@@ -70,7 +70,6 @@ data LamOps = LamOps { appV       :: Id
                      }
 
 -- TODO: drop reifyV, since it's in the rule
--- TODO: drop unpackV, since I'll probably replace String by Addr# for names.
 
 recursively :: Bool
 recursively = True -- False
@@ -140,7 +139,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
        | Just scrut' <- inlineMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
-     (repMeth -> Just e) -> Just e
+     (repMeth <+ lit -> Just e) -> Just e
      e@(collectTyArgs -> (Var v, tys))
        | j@(Just _) <- primFun (exprType e) v tys -> j
      -- (repMeth <+ (tryReify <=< inlineMaybe) -> Just e) -> Just e
@@ -164,6 +163,8 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
    tryReify e | reifiableExpr e = (guard recursively >> go e) <|> Just (mkReify e)
               | otherwise = -- pprTrace "Not reifiable:" (ppr e)
                             Nothing
+   lit :: ReExpr
+   lit = hasLit dflags guts inScope
    repMeth :: ReExpr
    repMeth (collectArgs -> (Var v, args@(length -> 4))) =
      do nm <- stripPrefix "ReificationRules.HOS." (qualifiedName (varName v))
@@ -383,7 +384,7 @@ mkLamOps = do
   let primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
                          <$> M.lookup (uqVarName v) primMap
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
-  toLitV <- findHosId "toLitE"
+  toLitV <- findHosId "litE"
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
   return (LamOps { .. })
@@ -454,6 +455,7 @@ toLitM :: (TyCon,Id) -> CoreM HasLit
 toLitM (hasLitTc,toLitV) =
   do hscEnv <- getHscEnv
      return $ \ dflags guts inScope e ->
+       guard (isConApp e) >>            -- TODO: expand is-literal test
        let ty = exprType e
            lfun :: CoreExpr -> CoreExpr
            lfun dict = dtrace "toLit" (ppr e) $
@@ -500,3 +502,7 @@ collectTyArgs = go []
  where
    go tys (App e (Type ty)) = go (ty:tys) e
    go tys e                 = (e,tys)
+
+isConApp :: CoreExpr -> Bool
+isConApp (collectArgs -> (Var (isDataConId_maybe -> Just _), _)) = True
+isConApp _ = False
