@@ -115,9 +115,16 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
   showsPrec _ (Var (V n)) = showString n
   showsPrec p (ConstE c)  = showsPrec' p c
   showsPrec p (u :^ v)      = showsApp p u v
-  showsPrec p (Lam q e)     =
-    showParen (p > 0) $
-    showString "\\ " . shows q . showString " -> " . shows e
+  showsPrec p e@(Lam {}) = showParen (p > 0) $
+    showString "\\ " . intercalateShows (showString " ") pats
+     . showString " -> " . body
+   where
+     (pats,body) = collect e
+      where
+        -- Collect shown patterns and body
+        collect :: E prim b -> ([ShowS],ShowS)
+        collect (Lam q e') = first (shows q :) (collect e')
+        collect e'         = ([],shows e')
 
 --   showsPrec p (Either f g) = showsOp2' "|||" (2,AssocRight) p f g
 --   showsPrec p (Loop h) = showsApp1 "loop" p h
