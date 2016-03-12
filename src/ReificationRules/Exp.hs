@@ -1,9 +1,9 @@
-{-# LANGUAGE CPP            #-}
-{-# LANGUAGE GADTs          #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE PatternGuards  #-}
-{-# LANGUAGE TypeOperators  #-}
-{-# LANGUAGE ViewPatterns   #-}
+{-# LANGUAGE CPP                 #-}
+{-# LANGUAGE GADTs               #-}
+{-# LANGUAGE KindSignatures      #-}
+{-# LANGUAGE PatternGuards       #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators       #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
@@ -27,6 +27,7 @@
 
 module ReificationRules.Exp where
 
+import Control.Arrow (first)
 import Data.Functor.Classes
 
 import ReificationRules.Misc (Unit,(:*),Eq1'(..))
@@ -75,18 +76,36 @@ data E :: (* -> *) -> (* -> *) where
   (:^)    :: E p (a -> b) -> E p a -> E p b
   Lam     :: Pat a -> E p b -> E p (a -> b)
 
+data Bind :: (* -> *) -> * where
+  (:=) :: Pat a -> E p a -> Bind p
+
+collectBinds :: E p a -> ([Bind p],E p a)
+collectBinds (Lam q body :^ rhs) = first ((q := rhs) :) (collectBinds body)
+collectBinds body                = ([],body)
+
+showsBind :: (Show' p, HasOpInfo p) => Bind p -> ShowS
+showsBind (p := e) = shows p . showString " = " . shows e
+
+showsBinds :: (Show' p, HasOpInfo p) => [Bind p] -> ShowS
+showsBinds [b] = showsBind b
+showsBinds bs = showString "{ "
+              . foldr1 (\ g f -> g . showString "; " . f) (map showsBind bs)
+              . showString " }"
+
 instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
 #ifdef Sugared
 --   showsPrec p (Either (Lam q a) (Lam r b) :^ ab) =
 --     showParen (p > 0) $
---     showString "case " . showsPrec 0 ab . showString " of { "
---                        . showsPrec 0 q . showString " -> " . showsPrec 0 a . showString " ; "
---                        . showsPrec 0 r . showString " -> " . showsPrec 0 b . showString " } "
-  -- TODO: Fix for beta-multi-redex
-  showsPrec p (Lam q body :^ rhs) =  -- beta redex as "let"
+--     showString "case " . shows ab . showString " of { "
+--                        . shows q . showString " -> " . shows a . showString " ; "
+--                        . shows r . showString " -> " . shows b . showString " } "
+
+  showsPrec p e@(Lam {} :^ _) =  -- beta multi-redex as "let"
     showParen (p > 0) $
-    showString "let " . showsPrec 0 q . showString " = " . showsPrec 0 rhs
-    . showString " in " . showsPrec 0 body
+    showString "let " . showsBinds binds . showString " in " . shows body
+   where
+     (binds,body) = collectBinds e
+     
 #endif
   showsPrec p (ConstE prim :^ u :^ v) | Just (OpInfo op fixity) <- opInfo prim =
     showsOp2 False op fixity p u v
@@ -95,7 +114,7 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
   showsPrec p (u :^ v)      = showsApp p u v
   showsPrec p (Lam q e)     =
     showParen (p > 0) $
-    showString "\\ " . showsPrec 0 q . showString " -> " . showsPrec 0 e
+    showString "\\ " . shows q . showString " -> " . shows e
 --   showsPrec p (Either f g) = showsOp2' "|||" (2,AssocRight) p f g
 --   showsPrec p (Loop h) = showsApp1 "loop" p h
 --   showsPrec p (CoerceE e)  = showsApp1 "coerce" p e
