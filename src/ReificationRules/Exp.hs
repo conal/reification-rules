@@ -27,6 +27,8 @@
 
 module ReificationRules.Exp where
 
+  -- TODO: Explicit exports
+
 import Control.Arrow (first)
 import Data.Functor.Classes
 import Data.Maybe (fromMaybe,catMaybes,listToMaybe)
@@ -79,6 +81,13 @@ data E :: (* -> *) -> (* -> *) where
   (:^)    :: E p (a -> b) -> E p a -> E p b
   Lam     :: Pat a -> E p b -> E p (a -> b)
 
+-- letE :: Pat a -> E p a -> E p b -> E p b
+-- letE q rhs body = (Lam q body) :^ rhs
+
+{--------------------------------------------------------------------
+    Show
+--------------------------------------------------------------------}
+
 intercalateShows :: Foldable f => ShowS -> f ShowS -> ShowS
 intercalateShows gap = foldr1 (\ g f -> g . gap . f)
 
@@ -89,19 +98,19 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
 --     showString "case " . shows ab . showString " of { "
 --                        . shows q . showString " -> " . shows a . showString " ; "
 --                        . shows r . showString " -> " . shows b . showString " } "
-
   showsPrec p e@(Lam {} :^ _) =  -- beta multi-redex as "let"
     showParen (p > 0) $
-    showString "let { "
-      . intercalateShows (showString "; ") binds
-      . showString " } in "
-      . body
+    showString "let " . shBinds binds . showString " in " . body
    where
      (binds,body) = collect e
      collect :: E prim b -> ([ShowS],ShowS)
      collect (Lam q e' :^ rhs) =
-       first ((shows q . showString " =  " . shows rhs) :) (collect e')
+       first ((shows q . showString " = " . shows rhs) :) (collect e')
      collect e'                = ([],shows e')
+     shBinds [b] = b
+     shBinds bs  = showString "{ "
+                 . intercalateShows (showString "; ") bs
+                 . showString " }"
 #endif
   showsPrec p (ConstE prim :^ u :^ v) | Just (OpInfo op fixity) <- opInfo prim =
     showsOp2 False op fixity p u v
