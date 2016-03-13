@@ -72,7 +72,7 @@ data LamOps = LamOps { appV       :: Id
 -- TODO: drop reifyV, since it's in the rule
 
 recursively :: Bool
-recursively = True -- False
+recursively = False -- True
 
 tracing :: Bool
 tracing = True -- False
@@ -82,7 +82,7 @@ dtrace str doc | tracing   = pprTrace str doc
                | otherwise = id
 
 pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
-pprTrans str a b = dtrace str (ppr a <+> text "-->" $$ ppr b) b
+pprTrans str a b = dtrace str (ppr a $$ text "-->" $$ ppr b) b
 
 traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
 traceUnop str f a = pprTrans str a (f a)
@@ -123,7 +123,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
      Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
        -- return $ letP v (tryReify rhs) (tryReify e)
        tryReify (Lam v e `App` rhs)
-     e@(Case (Case {}) _ _ _) -> tryReify (traceUnop "simplifyE" (simplifyE dflags False) e)
+     e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
      Case scrut v _ [(DataAlt dc, [a,b], rhs)]
          | isBoxedTupleTyCon (dataConTyCon dc) ->
        tryReify (mkLets [ NonRec v' scrut
@@ -133,18 +133,17 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
         tys = varType <$> [a,b]
         v'  = zapIdOccInfo v
      Case scrut v altsTy alts
-       | not (alreadyAbstReprd scrut)
-       , Just meth <- hasRepMeth dflags guts inScope (exprType scrut)
+       | not (alreadyAbstReprd scrut), Just meth <- hrMeth scrut
        -> tryReify $
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
        | Just scrut' <- inlineMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
-     (repMeth <+ lit -> Just e) -> Just e
+     (repMeth <+ lit <+ abstReprCon -> Just e) -> Just e
+     -- Primitive functions
      e@(collectTyArgs -> (Var v, tys))
        | j@(Just _) <- primFun (exprType e) v tys -> j
      -- (repMeth <+ (tryReify <=< inlineMaybe) -> Just e) -> Just e
      -- reify (eval e) --> e.
-     -- TODO: Move into primFun
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      -- Other applications
      App u v | not (isTyCoArg v)
@@ -152,7 +151,20 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
        varApps appV [dom,ran] <$> mapM tryReify [u,v]
      _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
-   -- helpers
+   -- TODO: Refactor to reduce the collectArgs applications.
+   abstReprCon :: ReExpr
+   abstReprCon e =
+     do guard (isConApp e)
+        meth <- hrMeth e
+        tryReify $
+          -- meth abstV `App` (simplE False (simplE True (meth repr'V) `App` e))
+          meth abstV `App` (simplE True (meth repr'V `App` e)) 
+     --
+     -- WORKING HERE. I think I need to let-float all constructor arguments and
+     -- then simplify (with inlining) the application of the constructor to the
+     -- variables. Could I instead transform just the constructor itself?
+     -- 
+   -- Helpers
    stringExpr :: String -> CoreExpr
    stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
    mkReify :: Unop CoreExpr
@@ -163,6 +175,8 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
    tryReify e | reifiableExpr e = (guard recursively >> go e) <|> Just (mkReify e)
               | otherwise = -- pprTrace "Not reifiable:" (ppr e)
                             Nothing
+   hrMeth :: CoreExpr -> Maybe (Id -> CoreExpr)
+   hrMeth = hasRepMeth dflags guts inScope . exprType
    lit :: ReExpr
    lit = hasLit dflags guts inScope
    repMeth :: ReExpr
@@ -179,6 +193,22 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
    -- Inline when possible.
    inlined :: Unop CoreExpr
    inlined e = fromMaybe e (inlineMaybe e)               
+   -- Simplify to fixed point
+   simplE :: Bool -> Unop CoreExpr
+#if 1
+   simplE inlining = -- traceUnop ("simplify " ++ show inlining) $
+     simplifyE dflags inlining
+#else
+   simplE inlining = sim 0
+    where
+      sim :: Int -> Unop CoreExpr
+      sim n e | n >= 10            = e
+              | e' `cheapEqExpr` e = e
+              | otherwise          = sim (n+1) e'
+       where
+         e' = traceUnop ("simplify " ++ show inlining ++ ", pass " ++ show n)
+              (simplifyE dflags inlining) e
+#endif
 
 onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
 onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
@@ -190,7 +220,7 @@ onAppsFun _ _ = Nothing
 -- Inline application head, if possible.
 inlineMaybe :: ReExpr
 
-inlineMaybe = traceRewrite "unfold" $
+inlineMaybe = -- traceRewrite "unfold" $
               onAppsFun (-- traceRewrite "inline" $
                          maybeUnfoldingTemplate . realIdUnfolding)
 
@@ -458,7 +488,7 @@ toLitM (hasLitTc,toLitV) =
        guard (isConApp e) >>            -- TODO: expand is-literal test
        let ty = exprType e
            lfun :: CoreExpr -> CoreExpr
-           lfun dict = dtrace "toLit" (ppr e) $
+           lfun dict = -- dtrace "toLit" (ppr e) $
                        varApps toLitV [ty] [dict,e]
        in
          lfun <$> buildDictionary hscEnv dflags guts inScope
@@ -506,3 +536,6 @@ collectTyArgs = go []
 isConApp :: CoreExpr -> Bool
 isConApp (collectArgs -> (Var (isDataConId_maybe -> Just _), _)) = True
 isConApp _ = False
+
+-- TODO: More efficient isConApp, discarding args early.
+
