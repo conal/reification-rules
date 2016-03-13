@@ -18,57 +18,18 @@
 
 module ReificationRules.Misc
   ( module Circat.Misc
+  , BinRel
   , Eq1'(..), (===?)
+  , PrimBasics(..), Evalable(..)
   ) where
 
 import Unsafe.Coerce (unsafeCoerce)     -- see below
 
 import Data.Proof.EQ ((:=:)(..))
 
-import Circat.Misc
+import Circat.Misc hiding (Evalable(..))
 
-{--------------------------------------------------------------------
-    Transformations
---------------------------------------------------------------------}
-
-#if 0
-
--- | Unary transformation
-type Unop  a = a -> a
-
--- | Binary transformation
-type Binop a = a -> Unop a
-
--- | Ternary transformation
-type Ternop a = a -> Binop a
-
--- | Compose list of unary transformations
-compose :: [Unop a] -> Unop a
-compose = foldr (.) id
-
-#endif
-
-{--------------------------------------------------------------------
-    Types
---------------------------------------------------------------------}
-
-#if 0
-
-infixr 1 :=>
-infixl 6 :+
-infixl 7 :*
-
-TODO: Perhaps replace these definitions with a GADT to emphasize the
-distinction between standard Haskell unit, cartesian product, and function
-types, vs the categorical counterparts (terminal object, categorical
-products, and coproducts).
-
-type Unit  = ()
-type (:*)  = (,)
-type (:+)  = Either
-type (:=>) = (->)
-
-#endif
+type BinRel a = a -> a -> Bool
 
 {--------------------------------------------------------------------
     Equality
@@ -90,3 +51,13 @@ a ===? b | a ==== b  = unsafeCoerce (Just Refl)
 -- TODO: Explore replacing Eq1' by TestEquality from Data.Type.Equality
 
 -- TODO: Maybe eliminate Eq' and ==?. If so, rename (====) and (===?).
+
+{--------------------------------------------------------------------
+    
+--------------------------------------------------------------------}
+
+class PrimBasics p where
+  unitP :: p Unit
+  pairP :: p (a :=> b :=> a :* b)
+
+class Evalable p where eval :: p a -> a
