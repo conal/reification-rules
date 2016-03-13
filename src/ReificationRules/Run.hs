@@ -83,7 +83,7 @@ genPdf :: Bool
 genPdf = True
 
 showPretty :: Bool
-showPretty = False
+showPretty = True
 
 showGraph :: Bool
 showGraph = False
