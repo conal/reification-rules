@@ -22,23 +22,32 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.FOS
-  ( EP,varP,constP,appP,lamP,letP,letPairP,reifyP,evalP
+  ( EP,toE,varP,constP,appP,lamP,letP,letPairP,reifyP,evalP, litE
+  , abst,repr,abst',repr', abstP,reprP
   ) where
 
 -- TODO: explicit exports
 
+import GHC.Types (type (~~))
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
 #ifdef Testing
 import Circat.Misc (Unop,Binop,Ternop)
 #endif
+import qualified Circat.Rep as Rep
+import Circat.Rep (HasRep,Rep)
 
 import ReificationRules.Misc ((:*))
 import ReificationRules.Exp
 import ReificationRules.Prim
 
 type EP a = E Prim a
+
+toE :: E p a -> E p a
+toE = id
+
+-- TODO: Eliminate toE, which was there to postpone FOS-vs-HOS choice
 
 type Name# = Addr#
 
@@ -92,6 +101,54 @@ evalP = evalE
 
 -- The NOINLINEs are just to reduce noise when examining Core output.
 -- Perhaps remove all but reifyP and evalP later.
+
+{--------------------------------------------------------------------
+    HasRep
+--------------------------------------------------------------------}
+
+-- Synonyms for HasRep methods. Using these names postpones the method selector
+-- unfolding built-in rule.
+
+-- abst :: HasRep a => Rep a -> a
+-- repr :: HasRep a => a -> Rep a
+
+abst :: (HasRep a, Rep a ~~ a') => a' -> a
+repr :: (HasRep a, Rep a ~~ a') => a -> a'
+
+abst = Rep.abst
+repr = Rep.repr
+
+{-# NOINLINE abst #-}
+{-# NOINLINE repr #-}
+
+-- abst' :: HasRep a => Rep a -> a
+-- repr' :: HasRep a => a -> Rep a
+
+abst' :: (HasRep a, Rep a ~~ a') => a' -> a
+repr' :: (HasRep a, Rep a ~~ a') => a -> a'
+
+abst' = Rep.abst
+repr' = Rep.repr
+
+-- I don't know why, but I was unable to find AbstP or ReprP from Plugin.
+
+-- abstP :: HasRep a => EP (Rep a -> a)
+-- reprP :: HasRep a => EP (a -> Rep a)
+
+abstP :: (HasRep a, Rep a ~~ a') => EP (a' -> a)
+reprP :: (HasRep a, Rep a ~~ a') => EP (a -> a')
+
+abstP = constP AbstP
+reprP = constP ReprP
+
+{--------------------------------------------------------------------
+    Rules
+--------------------------------------------------------------------}
+
+litE :: HasLit a => a -> EP a
+litE = constP . LitP . toLit
+
+-- TODO: rename to "litP".
 
 #ifdef Testing
 

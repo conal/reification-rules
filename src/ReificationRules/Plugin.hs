@@ -52,7 +52,8 @@ import ReificationRules.Simplify (simplifyE)
 --------------------------------------------------------------------}
 
 -- Reification operations
-data LamOps = LamOps { appV       :: Id
+data LamOps = LamOps { varV       :: Id
+                     , appV       :: Id
                      , lamV       :: Id
                      , reifyV     :: Id
                      , evalV      :: Id
@@ -69,7 +70,7 @@ data LamOps = LamOps { appV       :: Id
                      , hasLit     :: HasLit
                      }
 
--- TODO: drop reifyV, since it's in the rule
+-- TODO: Perhaps drop reifyV, since it's in the rule
 
 recursively :: Bool
 recursively = False -- True
@@ -101,25 +102,16 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
    go :: ReExpr
    go = \ case 
      -- e | dtrace "reify go:" (ppr e) False -> undefined
-#if 1
+     -- lamP :: forall a b. Name# -> EP b -> EP (a -> b)
+     -- (\ x -> e) --> lamP "x" e[x/eval (var "x")]
      Lam x e | not (isTyVar x) ->
-       do e' <- tryReify (subst1 x (varApps evalV [xty] [Var y]) e)
-          return $ varApps lamV [xty, exprType e]
-                     [stringExpr (uqVarName y), Lam y e']
+       do let x' = varApps varV [xty] [str]
+          e' <- tryReify (subst1 x (varApps evalV [xty] [x']) e)
+          return $ varApps lamV [xty, exprType e] [str, e']
        where
+         str = stringExpr (uniqVarName y)
          xty = varType x
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
-#else
-     -- This time, make a beta-redex instead of substituting.
-     -- f --> lamP (\ y -> reifyP (f (eval y)))
-     f@(Lam x body) | not (isTyVar x) ->
-       do e' <- tryReify (f `App` varApps evalV [xty] [Var y])
-          return $ varApps lamV [xty, exprType body]
-                     [stringExpr (uqVarName y), Lam y e']
-       where
-         xty = varType x
-         y   = setVarType x (exprType (mkReify (Var x))) -- *
-#endif
      Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
        go (Lam v e `App` rhs)
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
@@ -180,7 +172,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
    lit = hasLit dflags guts inScope
    repMeth :: ReExpr
    repMeth (collectArgs -> (Var v, args@(length -> 4))) =
-     do nm <- stripPrefix "ReificationRules.HOS." (qualifiedName (varName v))
+     do nm <- stripPrefix "ReificationRules.FOS." (fqVarName v)
         case nm of
           "abst" -> wrap abstPV
           "repr" -> wrap reprPV
@@ -392,20 +384,21 @@ mkLamOps = do
        where
          err = "reify installation: couldn't find "
                ++ str ++ " in " ++ moduleNameString modu
-      lookupHos   = lookupRdr (mkModuleName "ReificationRules.HOS")
-      findHosId   = lookupHos lookupId
+      lookupExp   = lookupRdr (mkModuleName "ReificationRules.FOS")
+      findExpId   = lookupExp lookupId
       findTupleId = lookupRdr (mkModuleName "Data.Tuple") lookupId
-  appV    <- findHosId "appP"
-  lamV    <- findHosId "lamP"
-  reifyV  <- findHosId "reifyP"
-  evalV   <- findHosId "evalP"
-  constV  <- findHosId "constP"
-  abstV   <- findHosId "abst"
-  reprV   <- findHosId "repr"
-  abst'V  <- findHosId "abst'"
-  repr'V  <- findHosId "repr'"
-  abstPV  <- findHosId "abstP"
-  reprPV  <- findHosId "reprP"
+  varV    <- findExpId "varP"
+  appV    <- findExpId "appP"
+  lamV    <- findExpId "lamP"
+  reifyV  <- findExpId "reifyP"
+  evalV   <- findExpId "evalP"
+  constV  <- findExpId "constP"
+  abstV   <- findExpId "abst"
+  reprV   <- findExpId "repr"
+  abst'V  <- findExpId "abst'"
+  repr'V  <- findExpId "repr'"
+  abstPV  <- findExpId "abstP"
+  reprPV  <- findExpId "reprP"
   fstV    <- findTupleId "fst"
   sndV    <- findTupleId "snd"
   primMap <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
@@ -413,7 +406,7 @@ mkLamOps = do
   let primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
                          <$> M.lookup (uqVarName v) primMap
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
-  toLitV <- findHosId "litE"
+  toLitV <- findExpId "litE"
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
   return (LamOps { .. })
@@ -504,8 +497,14 @@ toLitM (hasLitTc,toLitV) =
 on_mg_rules :: Unop [CoreRule] -> Unop ModGuts
 on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
 
+fqVarName :: Var -> String
+fqVarName = qualifiedName . varName
+
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
+
+uniqVarName :: Var -> String
+uniqVarName v = uqVarName v ++ "_" ++ show (varUnique v)
 
 -- Swiped from HERMIT.GHC
 -- | Get the fully qualified name from a 'Name'.

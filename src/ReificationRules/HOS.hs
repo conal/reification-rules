@@ -36,7 +36,7 @@ module ReificationRules.HOS
 
 import Data.Map
 
-import GHC.Types (type (~~),Int(..))  -- ,Double(..)
+import GHC.Types (type (~~))  -- 
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
@@ -106,9 +106,7 @@ appP :: forall a b. EP (a -> b) -> EP a -> EP b
 appP = app
 {-# NOINLINE appP #-}
 
--- lamP :: forall a b. Name -> (EP a -> EP b) -> EP (a -> b)
--- lamP = lam
--- {-# NOINLINE lamP #-}
+## BAZINGA!
 
 lamP :: forall a b. Addr# -> (EP a -> EP b) -> EP (a -> b)
 lamP addr = lam (unpackCString# addr)

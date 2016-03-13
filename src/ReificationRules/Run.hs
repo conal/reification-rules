@@ -31,7 +31,7 @@ import Prelude
 
 import Control.Monad (when)
 
-import ReificationRules.HOS (EP,toE,reifyP)
+import ReificationRules.FOS (EP,toE,reifyP)
 import ReificationRules.ToCCC (toCCC)
 
 import Circat.Category (Uncurriable)

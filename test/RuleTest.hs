@@ -31,7 +31,7 @@ module RuleTest where
 import GHC.Exts (inline)
 
 import ReificationRules.Misc (Unop)
-import ReificationRules.HOS (EP,toE,reifyP,repr,abst,constP,abstP)
+import ReificationRules.FOS (EP,toE,reifyP,repr,abst,constP,abstP)
 import ReificationRules.Prim (Prim(..))
 import ReificationRules.Run (run,Okay)
 
