@@ -8,9 +8,12 @@ check-ghc:
 go: Tests Makefile ../dist
 	./Tests
 
+GhcFlags += -fexpose-all-unfoldings
 GhcFlags += -dcore-lint
 GhcFlags += -fforce-recomp
-GhcFlags += -ddump-simpl
+
+# GhcFlags += -ddump-simpl
+
 # GhcFlags += -ddump-simpl-iterations
 
 # GhcFlags += -dshow-passes
@@ -27,7 +30,7 @@ GhcFlags += -dsuppress-uniques
 
 # GhcFlags += -ddump-rule-rewrites
 
-GhcFlags += -ddump-rules
+# GhcFlags += -ddump-rules
 
 # GhcFlags += -ddump-rule-firings
 # GhcFlags += -ddump-simpl-trace
@@ -62,6 +65,11 @@ HI_DIR = ../dist/build/ReificationRules
 %.iface: $(HI_DIR)/%.hi
 	$(ghc) --show-iface $(HI_DIR)/$*.hi > $*.iface
 
-ifaces: HOS.iface
+CIRCAT_HI_DIR = ../../circat/dist/build/Circat
+
+%.iface: $(CIRCAT_HI_DIR)/%.hi
+	$(ghc) --show-iface $(CIRCAT_HI_DIR)/$*.hi > $*.iface
+
+ifaces: HOS.iface Pair.iface
 
 
