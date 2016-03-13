@@ -47,12 +47,14 @@ import qualified Circat.Rep as Rep
 import Circat.Rep (HasRep,Rep)
 
 -- import Circat.Doubli
-import Circat.Pair (Pair(..)) -- TEMP
-import qualified Circat.RTree as R
-import qualified Circat.LTree as L
+-- import Circat.Pair (Pair(..)) -- TEMP
+-- import qualified Circat.RTree as R
+-- import qualified Circat.LTree as L
 
+import ReificationRules.Misc (Evalable)
 import ReificationRules.Exp
 import ReificationRules.Prim
+import ReificationRules.ShowUtils
 
 -- TODO: Drastically trim LambdaCCC.Lambda. See NewLambda for a start.
 
@@ -88,7 +90,7 @@ constE' p = (ConstE p, bot)
 reifyE' :: a -> E' p a
 reifyE' e = (reifyE e,bot)
 
-evalE' :: E' p a -> a
+evalE' :: (Show' p, HasOpInfo p, Evalable p) => E' p a -> a
 evalE' (e,_) = evalE e
 
 {--------------------------------------------------------------------
@@ -204,15 +206,15 @@ litE = constP . LitP . toLit
 -- 
 -- "reifyP D#" forall n. reifyP (D# n) = litE (D# n)
 
-"reifyP :#" reifyP (:#) = reifyP (\ x y -> abst (x,y))
+-- "reifyP :#" reifyP (:#) = reifyP (\ x y -> abst (x,y))
 
-"reifyP :#" forall x y. reifyP (x :# y) = reifyP (abst (x,y))
+-- "reifyP :#" forall x y. reifyP (x :# y) = reifyP (abst (x,y))
 
-"reify RTree.L" reifyP R.L = abstP
-"reify RTree.B" reifyP R.B = abstP
+-- "reify RTree.L" reifyP R.L = abstP
+-- "reify RTree.B" reifyP R.B = abstP
 
-"reify LTree.L" reifyP L.L = abstP
-"reify LTree.B" reifyP L.B = abstP
+-- "reify LTree.L" reifyP L.L = abstP
+-- "reify LTree.B" reifyP L.B = abstP
 
   #-}
 
