@@ -27,7 +27,6 @@ module ReificationRules.Prim
   ( Lit(..), HasLit(..), litSS
   , Prim(..),litP -- ,xor,cond,ifThenElse
   -- , primArrow
-  , PrimBasics(..) -- , EvalableP(..)
   -- Convenient constraint aliases
   , CircuitEq, CircuitOrd, CircuitBot, CircuitNum
   , CircuitFloating, CircuitFractional, CircuitFromIntegral
@@ -56,10 +55,10 @@ import Circat.Circuit (GenBuses,(:>)
 -- TODO: sort out the two uses of xor and simplify the Circat.Classes imports
 -- and uses.
 
-import Circat.Misc
 import Circat.Doubli
 
 import ReificationRules.ShowUtils
+import ReificationRules.Misc
 
 {--------------------------------------------------------------------
     Literals
@@ -129,8 +128,7 @@ litSS l | (Dict,Dict) <- (litHasShow l,litGenBuses l) = Dict
 
 #define LS (litSS -> Dict)
 
-instance Evalable (Lit a) where
-  type ValT (Lit a) = a
+instance Evalable Lit where
   eval (UnitL   x) = x
   eval (BoolL   x) = x
   eval (IntL    x) = x
@@ -336,8 +334,7 @@ instance -- (ClosedCat k, CoproductCat k, BoolCat k, NumCat k Int, RepCat k)
 --       in the constraint: BiCCC k
 --     (Use -XUndecidableInstances to permit this)
 
-instance Evalable (Prim a) where
-  type ValT (Prim a) = a
+instance Evalable Prim where
   eval (LitP l)      = eval l
   eval NotP          = not
   eval AndP          = (&&)
@@ -379,21 +376,9 @@ instance Evalable (Prim a) where
 litP :: HasLit a => a -> Prim a
 litP = LitP . toLit
 
-{--------------------------------------------------------------------
-    Some prim classes. Move later.
---------------------------------------------------------------------}
-
-class PrimBasics p where
-  unitP :: p Unit
-  pairP :: p (a :=> b :=> a :* b)
-
 instance PrimBasics Prim where
   unitP = LitP (UnitL ())
   pairP = PairP
-
--- class EvalableP p where evalP :: p a -> a
-
--- instance EvalableP Prim where evalP = eval
 
 instance HasOpInfo Prim where
   opInfo MulP    = Just $ OpInfo "*"     (7,AssocLeft )
