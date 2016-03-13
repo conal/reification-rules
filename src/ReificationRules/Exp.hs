@@ -84,6 +84,9 @@ data E :: (* -> *) -> (* -> *) where
 -- letE :: Pat a -> E p a -> E p b -> E p b
 -- letE q rhs body = (Lam q body) :^ rhs
 
+letPair :: Name -> Name -> E p c -> E p (a :* b -> c)
+letPair a b = Lam (VarPat (V a) :$ VarPat (V b)) 
+
 {--------------------------------------------------------------------
     Show
 --------------------------------------------------------------------}
