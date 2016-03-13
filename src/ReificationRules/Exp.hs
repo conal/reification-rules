@@ -29,8 +29,11 @@ module ReificationRules.Exp where
 
 import Control.Arrow (first)
 import Data.Functor.Classes
+import Data.Maybe (fromMaybe,catMaybes,listToMaybe)
 
-import ReificationRules.Misc (Unit,(:*),Eq1'(..))
+import Data.Proof.EQ
+
+import ReificationRules.Misc (Unit,(:*),Eq1'(..),(===?),Evalable(..),PrimBasics(..))
 import ReificationRules.ShowUtils
 
 -- | Variable names
@@ -76,22 +79,6 @@ data E :: (* -> *) -> (* -> *) where
   (:^)    :: E p (a -> b) -> E p a -> E p b
   Lam     :: Pat a -> E p b -> E p (a -> b)
 
-data Bind :: (* -> *) -> * where
-  (:=) :: Pat a -> E p a -> Bind p
-
-collectBinds :: E p a -> ([Bind p],E p a)
-collectBinds (Lam q body :^ rhs) = first ((q := rhs) :) (collectBinds body)
-collectBinds body                = ([],body)
-
-showsBind :: (Show' p, HasOpInfo p) => Bind p -> ShowS
-showsBind (p := e) = shows p . showString " = " . shows e
-
-showsBinds :: (Show' p, HasOpInfo p) => [Bind p] -> ShowS
-showsBinds [b] = showsBind b
-showsBinds bs = showString "{ "
-              . intercalateShows (showString "; ") (map showsBind bs)
-              . showString " }"
-
 intercalateShows :: Foldable f => ShowS -> f ShowS -> ShowS
 intercalateShows gap = foldr1 (\ g f -> g . gap . f)
 
@@ -105,10 +92,16 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
 
   showsPrec p e@(Lam {} :^ _) =  -- beta multi-redex as "let"
     showParen (p > 0) $
-    showString "let " . showsBinds binds . showString " in " . shows body
+    showString "let { "
+      . intercalateShows (showString "; ") binds
+      . showString " } in "
+      . body
    where
-     (binds,body) = collectBinds e
-     
+     (binds,body) = collect e
+     collect :: E prim b -> ([ShowS],ShowS)
+     collect (Lam q e' :^ rhs) =
+       first ((shows q . showString " =  " . shows rhs) :) (collect e')
+     collect e'                = ([],shows e')
 #endif
   showsPrec p (ConstE prim :^ u :^ v) | Just (OpInfo op fixity) <- opInfo prim =
     showsOp2 False op fixity p u v
@@ -133,17 +126,59 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
 -- TODO: Multi-line pretty printer with indentation
 
 {--------------------------------------------------------------------
+    Evaluation
+--------------------------------------------------------------------}
+
+evalE :: (HasOpInfo p, Show' p, Evalable p) =>  -- , Eq1' p, PrimBasics p
+         E p a -> a
+evalE e = -- trace ("evalE: " ++ show e) $
+          eval' e []  -- provide empty environment
+
+-- Expression evaluation requires a binding environment. In other words,
+-- expressions evaluate to a function from environments.
+
+-- | Single variable binding
+data Bind = forall a. Bind (V a) a
+-- | Variable environment
+type Env = [Bind]
+
+extendEnv :: Pat b -> b -> (Env -> Env)
+extendEnv UnitPat       ()      = id
+extendEnv (VarPat vb)   b       = (Bind vb b :)
+extendEnv (p :$ q)    (a,b)     = extendEnv q b . extendEnv p a
+extendEnv (p :@ q)      b       = extendEnv q b . extendEnv p b
+-- extendEnv ZeroPat      Zero     = id
+-- extendEnv (SuccPat q)  (Succ m) = extendEnv q m
+
+-- TODO: Rewrite extendEnv so that it examines the pattern just once,
+-- independently from the value.
+
+lookupVar :: forall a. V a -> Env -> Maybe a
+lookupVar va = listToMaybe . catMaybes . map check
+ where
+   check :: Bind -> Maybe a
+   check (Bind vb b) | Just Refl <- va ===? vb = Just b
+                     | otherwise               = Nothing
+
+eval' :: (HasOpInfo p, Show' p, Evalable p) => 
+         E p a -> Env -> a
+
+eval' (Var v)      env = fromMaybe (error $ "eval': unbound variable: " ++ show v) $
+                         lookupVar v env
+eval' (ConstE p)   _   = eval p
+eval' (u :^ v)     env = (eval' u env) (eval' v env)
+eval' (Lam p e)    env = \ x -> eval' e (extendEnv p x env)
+-- eval' (Either f g) env = eval' f env `either` eval' g env
+-- eval' (Loop h)     env = loop (eval' h env)
+-- eval' (CoerceE e)  env = coerce (eval' e env)
+
+-- TODO: Rework so that eval' can work independently of env. Will save repeated
+-- evals.
+
+{--------------------------------------------------------------------
     Special expressions
 --------------------------------------------------------------------}
 
 reifyE :: a -> E p a
 reifyE _ = error "reifyE: Oops -- not eliminated."
 {-# NOINLINE reifyE #-}  -- to give reify/eval rules a chance
-
-evalE :: E p a -> a
-evalE _ = error "evalE: not implemented"
-{-# NOINLINE evalE #-}  -- to give reify/eval rules a chance
-
--- TODO: Fill in evalE from LambdaCCC.Lambda if useful or fun.
-
-
