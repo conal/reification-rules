@@ -121,8 +121,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
          y   = setVarType x (exprType (mkReify (Var x))) -- *
 #endif
      Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
-       -- return $ letP v (tryReify rhs) (tryReify e)
-       tryReify (Lam v e `App` rhs)
+       go (Lam v e `App` rhs)
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
      Case scrut v _ [(DataAlt dc, [a,b], rhs)]
          | isBoxedTupleTyCon (dataConTyCon dc) ->
