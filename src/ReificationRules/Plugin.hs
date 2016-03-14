@@ -125,11 +125,10 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
           unless (isDeadBinder wild) $
             pprPanic "reify - case with live wild var" (ppr e)
           -- letPairP :: forall a b c. Name# -> Name# -> EP (a :* b) -> EP c -> EP c
-          go =<< -- tryReify
-            liftA2 (\ rhs' scrut' -> varApps letPairV [varType a, varType b, rhsTy]
-                                       [nameA,nameB,rhs',scrut'])
-                   (tryReify (subst [(a,evalA),(b,evalB)] rhs))
-                   (tryReify scrut)
+          liftA2 (\ rhs' scrut' -> varApps letPairV [varType a, varType b, rhsTy]
+                                     [nameA,nameB,scrut',rhs'])
+                 (tryReify (subst [(a,evalA),(b,evalB)] rhs))
+                 (tryReify scrut)
       where
         (nameA,evalA) = mkVar a
         (nameB,evalB) = mkVar b
