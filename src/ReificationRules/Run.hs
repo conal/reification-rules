@@ -21,8 +21,6 @@
 -- Run a test: reify, CCC, circuit
 ----------------------------------------------------------------------
 
--- {-# OPTIONS_GHC -ddump-rules #-}
-
 module ReificationRules.Run
   ( Okay, go,go',goSep,run,runSep,goM,goM',goMSep
   ) where

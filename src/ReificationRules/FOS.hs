@@ -21,6 +21,8 @@
 -- First-order syntax interface. GHC seems to be shy about applying rules under lambdas.
 ----------------------------------------------------------------------
 
+-- {-# OPTIONS_GHC -ddump-rules #-}
+
 module ReificationRules.FOS
   ( EP,varP,constP,appP,lamP,letP,letPairP,evalP,reifyP,reify, litE
   , abst,repr,abst',repr', abstP,reprP
