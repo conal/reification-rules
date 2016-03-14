@@ -22,7 +22,7 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.FOS
-  ( EP,toE,varP,constP,appP,lamP,letP,letPairP,reifyP,evalP, litE
+  ( EP,varP,constP,appP,lamP,letP,letPairP,reifyP,evalP, litE
   , abst,repr,abst',repr', abstP,reprP
   ) where
 
@@ -43,11 +43,6 @@ import ReificationRules.Exp
 import ReificationRules.Prim
 
 type EP a = E Prim a
-
-toE :: E p a -> E p a
-toE = id
-
--- TODO: Eliminate toE, which was there to postpone FOS-vs-HOS choice
 
 type Name# = Addr#
 
@@ -81,11 +76,11 @@ lamP :: forall a b. Name# -> EP b -> EP (a -> b)
 lamP addr body = Lam (varPat# addr) body
 {-# NOINLINE lamP #-}
 
-letP :: Name# -> EP a -> EP b -> EP b
+letP :: forall a b. Name# -> EP a -> EP b -> EP b
 letP x a b = Lam (varPat# x) b `appP` a
 {-# NOINLINE letP #-}
 
-letPairP :: Name# -> Name# -> EP (a :* b) -> EP c -> EP c
+letPairP :: forall a b c. Name# -> Name# -> EP (a :* b) -> EP c -> EP c
 letPairP x y ab c = Lam (varPat# x :$ varPat# y) c `appP` ab
 {-# NOINLINE letPairP #-}
 
