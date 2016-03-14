@@ -36,6 +36,7 @@ import Text.Printf (printf)
 import System.IO.Unsafe (unsafePerformIO)
 
 import GhcPlugins
+import CoreArity (etaExpand)
 import DynamicLoading
 import Kind (isLiftedTypeKind)
 import Type (coreView)
@@ -103,7 +104,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
  where
    go :: ReExpr
    go = \ case 
-     -- e | dtrace "reify go:" (ppr e) False -> undefined
+     e | dtrace "reify go:" (ppr e) False -> undefined
      -- lamP :: forall a b. Name# -> EP b -> EP (a -> b)
      -- (\ x -> e) --> lamP "x" e[x/eval (var "x")]
      Lam x e | not (isTyVar x) ->
@@ -170,18 +171,15 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
     where
       vty  = varType     v
       vstr = varNameExpr v
+   -- Constructor applied to type-only arguments 
    abstReprCon :: ReExpr
-   abstReprCon e =
-     do guard (isConApp e)
-        meth <- hrMeth e
+   abstReprCon e@(collectTyArgs -> (Var (isDataConId_maybe -> Just dc),_)) =
+     do let (binds,body) = collectBinders (etaExpand (dataConRepArity dc) e)
+        meth <- hrMeth body
         tryReify $
-          -- meth abstV `App` (simplE False (simplE True (meth repr'V) `App` e))
-          meth abstV `App` (simplE True (meth repr'V `App` e)) 
-     --
-     -- WORKING HERE. I think I need to let-float all constructor arguments and
-     -- then simplify (with inlining) the application of the constructor to the
-     -- variables. Could I instead transform just the constructor itself?
-     -- 
+          mkLams binds $
+            meth abstV `App` (simplE True (meth repr'V `App` body))
+   abstReprCon _ = Nothing
    -- Helpers
    mkReify :: Unop CoreExpr
    mkReify e = varApps reifyV [exprType e] [e]
