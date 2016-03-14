@@ -22,7 +22,7 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.FOS
-  ( EP,varP,constP,appP,lamP,letP,letPairP,reifyP,evalP, litE
+  ( EP,varP,constP,appP,lamP,letP,letPairP,evalP,reifyP,reify, litE
   , abst,repr,abst',repr', abstP,reprP
   , renameVars
   ) where
@@ -88,6 +88,13 @@ letPairP x y ab c = Lam (varPat# x :$ varPat# y) c `appP` ab
 reifyP :: forall a. a -> EP a
 reifyP a = reifyE a
 {-# NOINLINE reifyP #-}
+
+reify :: a -> EP a
+reify _ = error "reify: not implemented"
+-- reify f = renameVars (reifyP f)
+{-# NOINLINE reify #-}
+
+{-# RULES "reify & rename" forall f. reify f = renameVars (reifyP f) #-}
 
 evalP :: forall a. EP a -> a
 evalP = evalE

@@ -24,7 +24,7 @@
 -- {-# OPTIONS_GHC -ddump-rules #-}
 
 module ReificationRules.Run
-  ( Okay, go,go',goSep,run,runSep,goM,goM',goMSep, reify
+  ( Okay, go,go',goSep,run,runSep,goM,goM',goMSep
   ) where
 
 -- TODO: clean up interfaces.
@@ -33,7 +33,7 @@ import Prelude
 
 import Control.Monad (when)
 
-import ReificationRules.FOS (EP,reifyP,renameVars)
+import ReificationRules.FOS (EP,reify)
 import ReificationRules.ToCCC (toCCC)
 
 import Circat.Category (Uncurriable)
@@ -48,11 +48,6 @@ ranksep :: Double -> Attr
 ranksep n = ("ranksep",show n)
 
 type Okay = Uncurriable (:>) ()
-
-reify :: a -> EP a
-reify a = error "reify: not implemented" a
--- reify f = renameVars (reifyP f)
-{-# NOINLINE reify #-}
 
 go :: Okay a => String -> a -> IO ()
 go = error "go: not implemented"
@@ -73,10 +68,9 @@ goSep = error "goSep: not implemented"
 
 {-# RULES
 
-"reify & rename" forall f. reify f = renameVars (reifyP f)
-
 "go" forall name f. go name f = run name [] (reify f)
 
+-- -- TODO: Try this one again
 -- "go"    forall name         . go name          = go' name []
 
 "go'"   forall name attrs f . go' name attrs f = run name attrs (reify f)

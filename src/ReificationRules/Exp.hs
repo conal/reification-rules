@@ -227,6 +227,8 @@ huh = unsafePerformIO . return
 
 -- Without huh, renameVars calls get removed by the compiler in GHC 7.10.3 and 8.1.
 -- Demand changes from <S,U> to <L,U>.
+-- 
+-- TODO: Understand what's going on here.
 
 renameVars :: forall p a. (Show' p, HasOpInfo p, Eq1' p, PrimBasics p) => Unop (E p a)
 renameVars e0 = huh $
