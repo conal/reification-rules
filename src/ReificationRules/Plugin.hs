@@ -114,8 +114,19 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
          str = stringExpr (uniqVarName y)
          xty = varType x
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
-     Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>               -- TODO: try with "|"-style guard
-       go (Lam v e `App` rhs)
+     Let (NonRec v rhs) body -> guard (reifiableExpr rhs) >>               -- TODO: try with "|"-style guard
+#if 0
+       go (Lam v body `App` rhs)
+#else
+       -- Alternatively use letP. Works but more complicated.
+       -- letP :: forall a b. Name# -> EP a -> EP b -> EP b
+       liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType rhs]
+                                 [name,rhs',body'])
+              (tryReify (subst1 v evald body))
+              (tryReify rhs)
+      where
+        (name,evald) = mkVarEvald v
+#endif
        -- TODO: Use letV instead
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
      e@(Case scrut wild rhsTy [(DataAlt dc, [a,b], rhs)])
@@ -123,21 +134,16 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
          , reifiableExpr rhs ->
        do -- To start, require v to be unused. Later, extend.
           unless (isDeadBinder wild) $
-            pprPanic "reify - case with live wild var" (ppr e)
+            pprPanic "reify - case with live wild var (not yet handled)" (ppr e)
+          -- TODO: handle live wild var.
           -- letPairP :: forall a b c. Name# -> Name# -> EP (a :* b) -> EP c -> EP c
           liftA2 (\ rhs' scrut' -> varApps letPairV [varType a, varType b, rhsTy]
                                      [nameA,nameB,scrut',rhs'])
                  (tryReify (subst [(a,evalA),(b,evalB)] rhs))
                  (tryReify scrut)
       where
-        (nameA,evalA) = mkVar a
-        (nameB,evalB) = mkVar b
-        -- v --> ("v", eval (varP "v"))
-        mkVar :: Id -> (CoreExpr,CoreExpr)
-        mkVar v = (vstr, varApps evalV [vty] [varApps varV [vty] [vstr]])
-         where
-           vty  = varType     v
-           vstr = varNameExpr v
+        (nameA,evalA) = mkVarEvald a
+        (nameB,evalB) = mkVarEvald b
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut), Just meth <- hrMeth scrut
        -> tryReify $
@@ -158,6 +164,12 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
      _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor to reduce the collectArgs applications.
+    -- v --> ("v", eval (varP "v"))
+   mkVarEvald :: Id -> (CoreExpr,CoreExpr)
+   mkVarEvald v = (vstr, varApps evalV [vty] [varApps varV [vty] [vstr]])
+    where
+      vty  = varType     v
+      vstr = varNameExpr v
    abstReprCon :: ReExpr
    abstReprCon e =
      do guard (isConApp e)
