@@ -394,5 +394,42 @@ instance HasOpInfo Prim where
   opInfo GtP     = Just $ OpInfo ">"     (4,AssocNone )
   opInfo LeP     = Just $ OpInfo "<="    (4,AssocNone )
   opInfo GeP     = Just $ OpInfo ">="    (4,AssocNone )
-  opInfo PairP   = Just $ OpInfo ","     (0,AssocNone )
   opInfo _       = Nothing
+
+-- -- Hack:
+--   opInfo PairP   = Just $ OpInfo ","     (0,AssocNone )
+
+
+instance Eq1' Prim where
+  LitP a  ==== LitP b  = a ==== b
+  NotP    ==== NotP    = True
+  AndP    ==== AndP    = True
+  OrP     ==== OrP     = True
+  XorP    ==== XorP    = True
+  NegateP ==== NegateP = True
+  AddP    ==== AddP    = True
+  SubP    ==== SubP    = True
+  MulP    ==== MulP    = True
+  EqP     ==== EqP     = True
+  NeP     ==== NeP     = True
+  LtP     ==== LtP     = True
+  GtP     ==== GtP     = True
+  LeP     ==== LeP     = True
+  GeP     ==== GeP     = True
+  ExlP    ==== ExlP    = True
+  ExrP    ==== ExrP    = True
+  InlP    ==== InlP    = True
+  InrP    ==== InrP    = True
+  PairP   ==== PairP   = True
+  IfP     ==== IfP     = True
+  AbstP   ==== AbstP   = True
+  ReprP   ==== ReprP   = True
+  BottomP ==== BottomP = True
+  _       ==== _       = False
+
+instance Eq1' Lit where
+  UnitL x   ==== UnitL y   = x == y
+  BoolL x   ==== BoolL y   = x == y
+  IntL  x   ==== IntL  y   = x == y
+  DoubleL x ==== DoubleL y = x == y
+  _         ==== _         = False
