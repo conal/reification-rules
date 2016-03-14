@@ -16,7 +16,7 @@
 -- 
 ----------------------------------------------------------------------
 
-module ReificationRules.Simplify where
+module ReificationRules.Simplify (simplifyE) where
 
 -- TODO: explicit exports
 
