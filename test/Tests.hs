@@ -29,7 +29,7 @@
 -- TODO: explicit exports
 
 import ReificationRules.Misc (Unop,BinRel)
-import ReificationRules.FOS (EP,toE,reifyP,repr,abst)
+import ReificationRules.FOS (EP,reifyP,repr,abst)
 import ReificationRules.Run (run,Okay)
 
 import Circat.Doubli
@@ -104,25 +104,28 @@ import qualified Circat.Rep as R -- TEMP
 -- bar :: (Int,Int)
 -- bar = (5,6)
 
-bar :: Pair Int -> Int
-bar = \ case a :# b -> a + b
+bar :: Int -> Int
+bar x = y * y where y = x + x
+
+-- bar :: Pair Int -> Int
+-- bar = \ case a :# b -> a + b
 
 -- bar :: Int -> Pair Int
 -- bar x = 2 :# (3 * x)
 
 main :: IO ()
 
--- main = print (toE (reifyP (abst :: (Int,Int) -> Pair Int)))
+-- main = print (reifyP (abst :: (Int,Int) -> Pair Int))
 
--- main = print (toE (reifyP ((:#) :: Int -> Int -> Pair Int)))
+-- main = print (reifyP ((:#) :: Int -> Int -> Pair Int))
 
--- main = print (toE (reifyP (3 :# 5 :: Pair Int)))
+-- main = print (reifyP (3 :# 5 :: Pair Int))
 
--- main = print (toE (reifyP (\ case a :# b -> a + b :: Int)))
+-- main = print (reifyP (\ case a :# b -> a + b :: Int))
 
 -- main = go "foo" (\ case a :# b -> a + b :: Int)
 
--- main = print (toE (reifyP ((\ case L a -> a) :: Tree N0 Int -> Int)))
+-- main = print (reifyP ((\ case L a -> a) :: Tree N0 Int -> Int))
 
 -- main = print ((abst (5,6) :: Pair Int), (repr (7 :# 8) :: (Int,Int)))
 
@@ -134,17 +137,13 @@ main :: IO ()
 
 -- main = go "foo" (abst (5,6) :: Pair Int)
 
--- main = print (toE foo)
-
 -- main = go "foo" (\ (x :: Int) y -> x > y + 3)
 
 -- main = go "foo" ((\ x y -> x > y + 3) :: BinRel Int)
 
--- main = print (toE (reifyP (fmap :: (Int -> Bool) -> Pair Int -> Pair Bool)))
+-- main = print (reifyP (fmap :: (Int -> Bool) -> Pair Int -> Pair Bool))
 
--- main = print (toE foo)
-
-main = print (toE (reifyP bar))
+main = print (reifyP bar)
 
 -- bar :: Pair Int -> Pair Bool
 -- bar = fmap (> 0)
