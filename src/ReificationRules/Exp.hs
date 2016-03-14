@@ -4,6 +4,7 @@
 {-# LANGUAGE PatternGuards       #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators       #-}
+{-# LANGUAGE ViewPatterns        #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
@@ -30,12 +31,18 @@ module ReificationRules.Exp where
   -- TODO: Explicit exports
 
 import Control.Arrow (first)
-import Data.Functor.Classes
 import Data.Maybe (fromMaybe,catMaybes,listToMaybe)
+
+import qualified Data.Map as M
+import Debug.Trace (trace)
+
+-- transformers
+import Control.Monad.Trans.Reader
+import Control.Monad.Trans.State
 
 import Data.Proof.EQ
 
-import ReificationRules.Misc (Unit,(:*),Eq1'(..),(===?),Evalable(..),PrimBasics(..))
+import ReificationRules.Misc (Unop,Unit,(:*),Eq1'(..),(===?),Evalable(..),PrimBasics(..))
 import ReificationRules.ShowUtils
 
 -- | Variable names
@@ -94,7 +101,7 @@ letPair a b = Lam (VarPat (V a) :$ VarPat (V b))
 intercalateShows :: Foldable f => ShowS -> f ShowS -> ShowS
 intercalateShows gap = foldr1 (\ g f -> g . gap . f)
 
-instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
+instance (HasOpInfo prim, Show' prim, Eq1' prim, PrimBasics prim) => Show (E prim a) where
 #ifdef Sugared
 --   showsPrec p (Either (Lam q a) (Lam r b) :^ ab) =
 --     showParen (p > 0) $
@@ -114,6 +121,8 @@ instance (HasOpInfo prim, Show' prim) => Show (E prim a) where
      shBinds bs  = showString "{ "
                  . intercalateShows (showString "; ") bs
                  . showString " }"
+  showsPrec p (ConstE ((==== pairP) -> True) :^ u :^ v)
+                          = showsPair p u v
 #endif
   showsPrec p (ConstE prim :^ u :^ v) | Just (OpInfo op fixity) <- opInfo prim =
     showsOp2 False op fixity p u v
@@ -194,3 +203,95 @@ eval' (Lam p e)    env = \ x -> eval' e (extendEnv p x env)
 reifyE :: a -> E p a
 reifyE _ = error "reifyE: Oops -- not eliminated."
 {-# NOINLINE reifyE #-}  -- to give reify/eval rules a chance
+
+{--------------------------------------------------------------------
+    Clean up variable names
+--------------------------------------------------------------------}
+
+-- Max numeric suffix used per simple name
+type UsedNames = M.Map Name Int
+
+-- Renaming substitution
+type Renamer = M.Map Name Name
+
+type RenameEnv = (UsedNames,Renamer)
+
+type RenameR = Reader RenameEnv
+type RenameS = State  RenameEnv
+
+-- traceUnop :: (Show a, Show b) => String -> Unop (a -> b)
+-- traceUnop str f a = trace (str ++ ": " ++ show a ++ " --> " ++ show b)
+--                     -- seq (length (str ++ show a ++ show b))
+--                     -- trace ""
+--                     b
+--  where
+--    b = f a
+
+
+-- WORKING HERE. Without the "trace" below, the renameVars call disappears.
+
+
+renameVars :: forall p a. (Show' p, HasOpInfo p, Eq1' p, PrimBasics p) => Unop (E p a)
+renameVars e0 = trace "renameVars" $
+                runReader (renameExp e0) mempty
+--                 traceUnop "renameVars"
+--                 (flip runReader mempty . renameExp) e0
+                
+ where
+   renameExp :: E p b -> RenameR (E p b)
+   -- renameExp e | trace ("renameExp: " ++ show e) False = undefined
+   renameExp (Var (V nm)) =
+    do (_,renamer) <- ask
+       let nm' = fromMaybe (error ("RR.Exp.rename: free variable " ++ show nm
+                                   ++ " in expression " ++ show e0))
+                   (M.lookup nm renamer)
+       return (Var (V nm'))
+   renameExp (ConstE p) = return (ConstE p)
+   renameExp (u :^ v) = (:^) <$> renameExp u <*> renameExp v
+   renameExp (Lam pat body) =
+     do env <- ask
+        let (pat',env') = runState (renamePat pat) env
+        body' <- local (const env') (renameExp body)
+        return $ -- trace ("rename lam env = " ++ show env) $
+                 -- trace ("rename lam env' = " ++ show env') $
+                 Lam pat' body'
+   renamePat :: Pat b -> RenameS (Pat b)
+   -- renamePat p | trace ("renamePat: " ++ show p) False = undefined
+   renamePat UnitPat           = return UnitPat
+   renamePat (VarPat (V name)) =
+     do (used,renamer) <- get
+        let base        = stripName name
+            (mbN,used') = M.insertLookupWithKey (const (+)) base 1 used
+            name'       = maybe base ((base ++) . show) mbN
+            renamer'    = M.insert name name' renamer
+        put (used',renamer')
+        return $ VarPat (V name')
+   renamePat (u :$ v) = (:$) <$> renamePat u <*> renamePat v
+   renamePat (u :@ v) = (:@) <$> renamePat u <*> renamePat v
+
+-- {-# INLINABLE renameVars #-}
+
+-- Names look like foo_suff. Drop the suffix.
+-- Keep consistent with fqVarName in Plugin.
+stripName :: Unop Name
+stripName name = -- trace ("stripName " ++ show name) $
+                 reverse . tail' . dropWhile (/= '_') . reverse $ name
+ where
+   tail' [] = error ("stripName: missing suffix in " ++ show name)
+   tail' (_:cs) = cs
+
+#if 0
+
+data E :: (* -> *) -> (* -> *) where
+  Var     :: V a -> E p a
+  ConstE  :: p a -> E p a
+  (:^)    :: E p (a -> b) -> E p a -> E p b
+  Lam     :: Pat a -> E p b -> E p (a -> b)
+
+data Pat :: * -> * where
+  UnitPat :: Pat Unit
+  VarPat  :: V a -> Pat a
+  (:$)    :: Pat a -> Pat b -> Pat (a :* b)
+  (:@)    :: Pat a -> Pat a -> Pat a
+
+#endif
