@@ -78,7 +78,7 @@ recursively :: Bool
 recursively = False -- True
 
 tracing :: Bool
-tracing = True -- False
+tracing = False -- True
 
 dtrace :: String -> SDoc -> a -> a
 dtrace str doc | tracing   = pprTrace str doc
@@ -103,7 +103,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
  where
    go :: ReExpr
    go = \ case 
-     e | dtrace "reify go:" (ppr e) False -> undefined
+     -- e | dtrace "reify go:" (ppr e) False -> undefined
      -- lamP :: forall a b. Name# -> EP b -> EP (a -> b)
      -- (\ x -> e) --> lamP "x" e[x/eval (var "x")]
      Lam x e | not (isTyVar x) ->
@@ -122,8 +122,8 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
        -- letP :: forall a b. Name# -> EP a -> EP b -> EP b
        liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType rhs]
                                  [name,rhs',body'])
-              (tryReify (subst1 v evald body))
               (tryReify rhs)
+              (tryReify (subst1 v evald body))
       where
         (name,evald) = mkVarEvald v
 #endif
@@ -530,6 +530,7 @@ fqVarName = qualifiedName . varName
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
 
+-- Keep consistent with stripName in Exp.
 uniqVarName :: Var -> String
 uniqVarName v = uqVarName v ++ "_" ++ show (varUnique v)
 
