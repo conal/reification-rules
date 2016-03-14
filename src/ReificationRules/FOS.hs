@@ -24,6 +24,7 @@
 module ReificationRules.FOS
   ( EP,varP,constP,appP,lamP,letP,letPairP,reifyP,evalP, litE
   , abst,repr,abst',repr', abstP,reprP
+  , renameVars
   ) where
 
 -- TODO: explicit exports
@@ -151,11 +152,13 @@ litE = constP . LitP . toLit
     Tests
 --------------------------------------------------------------------}
 
-app1 :: p (a -> b) -> E' p a -> E' p b
-app1 p = app (constE' p)
+-- Needs fixing for FOS
 
-app2 :: p (a -> b -> c) -> E' p a -> E' p b -> E' p c
-app2 f a b = app (app1 f a) b
+app1 :: p (a -> b) -> E p a -> E p b
+app1 p = (ConstE p :^)
+
+app2 :: p (a -> b -> c) -> E p a -> E p b -> E p c
+app2 f a b = app1 f a :^ b
 
 twice :: Unop (Unop a)
 twice f = f . f
@@ -167,11 +170,11 @@ orOf :: Binop (EP Bool)
 orOf = app2 OrP
 
 t1 :: EP (Bool -> Bool)
-t1 = constE' NotP
+t1 = constP NotP
 -- (not,fromList [])
 
 t2 :: EP (Unop Bool)
-t2 = lam "b" notOf
+t2 = lamP "b"# notOf
 -- (\ b -> not b,fromList [("b",1)])
 
 t3 :: EP (Unop Bool)
