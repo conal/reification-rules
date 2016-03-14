@@ -79,7 +79,7 @@ recursively :: Bool
 recursively = False -- True
 
 tracing :: Bool
-tracing = False -- True
+tracing = True -- False
 
 dtrace :: String -> SDoc -> a -> a
 dtrace str doc | tracing   = pprTrace str doc
@@ -146,12 +146,20 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
         (nameA,evalA) = mkVarEvald a
         (nameB,evalB) = mkVarEvald b
      Case scrut v altsTy alts
-       | not (alreadyAbstReprd scrut), Just meth <- hrMeth scrut
+       | not (alreadyAbstReprd scrut)
+       , Just meth <- hrMeth scrut
        -> tryReify $
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
        | Just scrut' <- inlineMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
-     (repMeth <+ lit <+ abstReprCon -> Just e) -> Just e
+     (repMeth <+ lit -> Just e) -> Just e
+     -- Constructor applied to type-only arguments.
+     e@(collectTyArgs -> (Var (isDataConId_maybe -> Just dc),_))
+       | let (binds,body) = collectBinders (etaExpand (dataConRepArity dc) e)
+       , Just meth <- hrMeth body
+       -> do tryReify $
+               mkLams binds $
+                 meth abstV `App` (simplE True (meth repr'V `App` body))
      -- Primitive functions
      e@(collectTyArgs -> (Var v, tys))
        | j@(Just _) <- primFun (exprType e) v tys -> j
@@ -171,15 +179,6 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
     where
       vty  = varType     v
       vstr = varNameExpr v
-   -- Constructor applied to type-only arguments 
-   abstReprCon :: ReExpr
-   abstReprCon e@(collectTyArgs -> (Var (isDataConId_maybe -> Just dc),_)) =
-     do let (binds,body) = collectBinders (etaExpand (dataConRepArity dc) e)
-        meth <- hrMeth body
-        tryReify $
-          mkLams binds $
-            meth abstV `App` (simplE True (meth repr'V `App` body))
-   abstReprCon _ = Nothing
    -- Helpers
    mkReify :: Unop CoreExpr
    mkReify e = varApps reifyV [exprType e] [e]
