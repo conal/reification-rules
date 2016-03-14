@@ -28,13 +28,15 @@
 
 module ReificationRules.Exp where
 
-  -- TODO: Explicit exports
+-- TODO: Explicit exports
 
 import Control.Arrow (first)
 import Data.Maybe (fromMaybe,catMaybes,listToMaybe)
 
+import System.IO.Unsafe (unsafePerformIO)  -- experiment
+
 import qualified Data.Map as M
-import Debug.Trace (trace)
+-- import Debug.Trace
 
 -- transformers
 import Control.Monad.Trans.Reader
@@ -219,24 +221,16 @@ type RenameEnv = (UsedNames,Renamer)
 type RenameR = Reader RenameEnv
 type RenameS = State  RenameEnv
 
--- traceUnop :: (Show a, Show b) => String -> Unop (a -> b)
--- traceUnop str f a = trace (str ++ ": " ++ show a ++ " --> " ++ show b)
---                     -- seq (length (str ++ show a ++ show b))
---                     -- trace ""
---                     b
---  where
---    b = f a
+-- Huh?
+huh :: a -> a
+huh = unsafePerformIO . return
 
-
--- WORKING HERE. Without the "trace" below, the renameVars call disappears.
-
+-- Without huh, renameVars calls get removed by the compiler in GHC 7.10.3 and 8.1.
+-- Demand changes from <S,U> to <L,U>.
 
 renameVars :: forall p a. (Show' p, HasOpInfo p, Eq1' p, PrimBasics p) => Unop (E p a)
-renameVars e0 = trace "renameVars" $
+renameVars e0 = huh $
                 runReader (renameExp e0) mempty
---                 traceUnop "renameVars"
---                 (flip runReader mempty . renameExp) e0
-                
  where
    renameExp :: E p b -> RenameR (E p b)
    -- renameExp e | trace ("renameExp: " ++ show e) False = undefined
@@ -268,8 +262,7 @@ renameVars e0 = trace "renameVars" $
         return $ VarPat (V name')
    renamePat (u :$ v) = (:$) <$> renamePat u <*> renamePat v
    renamePat (u :@ v) = (:@) <$> renamePat u <*> renamePat v
-
--- {-# INLINABLE renameVars #-}
+{-# NOINLINE renameVars #-}
 
 -- Names look like foo_suff. Drop the suffix.
 -- Keep consistent with fqVarName in Plugin.
