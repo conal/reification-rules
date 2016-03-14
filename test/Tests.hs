@@ -1,13 +1,6 @@
-{-# LANGUAGE CPP, ScopedTypeVariables, LambdaCase #-}
-{-# LANGUAGE FlexibleContexts #-}  -- go
+{-# LANGUAGE LambdaCase #-}
 
--- For Pair (to remove)
-{-# LANGUAGE TypeFamilies #-}
-
--- For HR experiment
-{-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances #-}
-
-{-# OPTIONS_GHC -Wall #-}
+{-# OPTIONS_GHC -Wall -fno-warn-missing-signatures #-}
 
 {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
 {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
@@ -28,8 +21,8 @@
 
 -- TODO: explicit exports
 
-import ReificationRules.Misc (Unop,BinRel)
-import ReificationRules.FOS (EP,reifyP,repr,abst)
+import ReificationRules.Misc (Unop,Binop,BinRel)
+import ReificationRules.FOS (EP,repr,abst,reify)
 import ReificationRules.Run (run,Okay)
 
 import Circat.Doubli
@@ -41,169 +34,84 @@ import Circat.RTree
 
 import qualified Circat.Rep as R -- TEMP
 
--- bar :: Unop Bool
--- bar = not
-
--- bar :: EP Bool
--- bar = not False
-
--- bar :: EP Bool
--- bar = (4 :: Int) > 3
-
--- bar :: Bool -> Bool
--- bar = \ x -> x
-
--- bar :: Int -> Bool
--- bar = \ x -> x > 3
-
--- bar :: Bool -> Bool
--- bar = \ x -> not (not x)
-
--- bar :: Int -> Int
--- bar = \ x -> x
-
--- bar :: EP Int
--- bar = 3
-
--- bar :: EP Doubli
--- bar = 3
-
--- bar :: Bool -> Bool -> Bool
--- bar = \ x y -> x || not y
-
--- bar :: Int -> Int -> Bool
--- bar = \ x y -> x > y + 3
-
--- bar :: Int -> Int -> Int
--- bar = \ x y -> x
-
--- bar :: Double -> Double -> Bool
--- bar = \ x y -> x > y + 3
-
--- bar :: (Int,Bool) -> Bool
--- bar = snd
-
--- bar :: Int -> Bool -> (Bool,Int)
--- bar x y = (y,x)
-
--- bar :: Int
--- bar = 3
-
--- bar :: Doubli
--- bar = 3.0
-
--- bar :: (Int,Bool) -> (Bool,Int)
--- bar p = (snd p, fst p)
-
--- bar :: (Int,Int)
--- bar = repr (2 :# 3)
-
--- bar :: Pair Int
--- bar = abst (5,6)
-
--- bar :: (Int,Int)
--- bar = (5,6)
-
-bar :: Int -> Int
-bar x = y * y where y = x + x
-
--- bar :: Pair Int -> Int
--- bar = \ case a :# b -> a + b
-
--- bar :: Int -> Pair Int
--- bar x = 2 :# (3 * x)
-
 main :: IO ()
-
--- main = print (reifyP (abst :: (Int,Int) -> Pair Int))
-
--- main = print (reifyP ((:#) :: Int -> Int -> Pair Int))
-
--- main = print (reifyP (3 :# 5 :: Pair Int))
-
--- main = print (reifyP (\ case a :# b -> a + b :: Int))
-
--- main = go "foo" (\ case a :# b -> a + b :: Int)
-
--- main = print (reifyP ((\ case L a -> a) :: Tree N0 Int -> Int))
-
--- main = print ((abst (5,6) :: Pair Int), (repr (7 :# 8) :: (Int,Int)))
-
--- main = print ((abst'' (5,6) :: Pair Int), (repr'' (7 :# 8) :: (Int,Int)))
-
--- main = print (abst (repr (5 :# 6)) :: Pair Int)
-
--- main = go "foo" (abst (repr (5 :# 6)) :: Pair Int)
-
--- main = go "foo" (abst (5,6) :: Pair Int)
-
--- main = go "foo" (\ (x :: Int) y -> x > y + 3)
-
--- main = go "foo" ((\ x y -> x > y + 3) :: BinRel Int)
-
--- main = print (reifyP (fmap :: (Int -> Bool) -> Pair Int -> Pair Bool))
-
-main = print (reifyP bar)
-
--- bar :: Pair Int -> Pair Bool
--- bar = fmap (> 0)
-
-#if 1
-{--------------------------------------------------------------------
-    Running
---------------------------------------------------------------------}
-
--- The go rule in Run no longer fires, so redo here.
--- TODO: Investigate further
-
-{-# RULES "go" forall name f. go name f = run name [] (reifyP f) #-}
-
-go :: Okay a => String -> a -> IO ()
-go = error "go -- oops"
-{-# NOINLINE go #-}
-
-#endif
+main = print (reify t)
 
 {--------------------------------------------------------------------
-    other experiments
+    Working examples
 --------------------------------------------------------------------}
 
-#if 0
+-- t = not
 
-scrutinee :: R.HasRep a => a -> a
-scrutinee = id
-{-# NOINLINE scrutinee #-}
+-- t = not False
 
-{-# RULES
+-- t = (4 :: Int) > 3
 
--- "scrutinee Pair" forall p. scrutinee p = case repr p of (a,b) -> a :# b
+-- t = \ (x :: Bool) -> x
 
--- "scrutinee RTree Z" forall t. scrutinee t = L (repr t)
--- "scrutinee RTree S" forall t. scrutinee t = B (repr t)
+-- t = \ (x :: Int) -> x
 
--- "reify case P" forall p f.
---   reifyP (case p of { a :# b -> f a b }) = reifyP (case repr p of { (a,b) -> f a b })
+-- t = \ (x :: Int) -> x > 3
 
- #-}
+-- t = \ x -> not (not x)
 
-#endif
+-- t = 3 :: Int
 
-#if 0
-class HR a r | a -> r where
-  abst' :: r -> a
-  repr' :: a -> r
+-- t = 3 :: Float
 
-instance HR (Pair a) (a,a) where
-  abst' (a,b) = (a :# b)
-  repr' (a :# b) = (a,b)
+-- t = \ x y -> x || not y
 
-abst'' :: HR a r => r -> a
-repr'' :: HR a r => a -> r
+-- t = \ (x :: Int) y -> x > y + 3
 
-abst'' = abst'
-repr'' = repr'
+-- t = \ (x :: Int) (_y :: Int) -> x
 
-{-# NOINLINE abst'' #-}
-{-# NOINLINE repr'' #-}
+-- t :: (Int,Bool) -> Bool
+-- t = snd
 
-#endif
+-- t :: Int -> Bool -> (Bool,Int)
+-- t x y = (y,x)
+
+-- t :: Int
+-- t = 3
+
+-- t :: Doubli
+-- t = 3.0
+
+-- t (p :: (Int,Bool)) = (snd p, fst p)
+
+-- t = (5,6) :: (Int,Int)
+
+-- t = repr (2 :# 3 :: Pair Int)
+
+-- t = abst (5,6)  :: Pair Int
+
+-- t = abst :: (Int,Int) -> Pair Int
+
+-- t = 3 :# 5 :: Pair Int
+
+-- t (x :: Int) = y * y where y = x + x
+
+-- t = \ case u :# v -> u + v :: Int
+
+-- t = \ case (B ts :: Tree N2 Int) -> ts
+
+t = (1 +) :: Unop Int
+
+-- t = (+ 1) :: Unop Int
+
+{--------------------------------------------------------------------
+    Non-working examples
+--------------------------------------------------------------------}
+
+-- -- The constructor arguments get simplified with inlining, including $fNumInt_$c*.
+-- t x = 2 :# (3 * x) :: Pair Int
+
+-- -- I don't yet handle Double. To do: switch from Doubli to Double in Circat
+-- t :: Double -> Double -> Bool
+-- t = \ x y -> x > y + 3
+
+-- -- Unsaturated non-standard constructor
+-- t = (:#) :: Int -> Int -> Pair Int
+
+-- -- I'm not yet inlining reify args
+-- t = fmap :: (Int -> Bool) -> Pair Int -> Pair Bool
