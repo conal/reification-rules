@@ -26,7 +26,7 @@ module ReificationRules.Plugin (plugin) where
 
 import Control.Arrow (first,second)
 import Control.Applicative (liftA2,(<|>))
-import Control.Monad (guard,(<=<))
+import Control.Monad (unless,guard,(<=<))
 import Data.Maybe (fromMaybe,isJust)
 import Data.List (stripPrefix,isPrefixOf,isSuffixOf)
 import Data.Char (toLower)
@@ -55,6 +55,8 @@ import ReificationRules.Simplify (simplifyE)
 data LamOps = LamOps { varV       :: Id
                      , appV       :: Id
                      , lamV       :: Id
+                     , letV       :: Id
+                     , letPairV   :: Id
                      , reifyV     :: Id
                      , evalV      :: Id
                      , primFun    :: PrimFun
@@ -101,7 +103,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
  where
    go :: ReExpr
    go = \ case 
-     -- e | dtrace "reify go:" (ppr e) False -> undefined
+     e | dtrace "reify go:" (ppr e) False -> undefined
      -- lamP :: forall a b. Name# -> EP b -> EP (a -> b)
      -- (\ x -> e) --> lamP "x" e[x/eval (var "x")]
      Lam x e | not (isTyVar x) ->
@@ -112,17 +114,31 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
          str = stringExpr (uniqVarName y)
          xty = varType x
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
-     Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>
+     Let (NonRec v rhs) e -> guard (reifiableExpr rhs) >>               -- TODO: try with "|"-style guard
        go (Lam v e `App` rhs)
+       -- TODO: Use letV instead
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
-     Case scrut v _ [(DataAlt dc, [a,b], rhs)]
-         | isBoxedTupleTyCon (dataConTyCon dc) ->
-       tryReify (mkLets [ NonRec v' scrut
-                        , NonRec a (varApps fstV tys [Var v']) 
-                        , NonRec b (varApps sndV tys [Var v']) ] rhs)
+     e@(Case scrut wild rhsTy [(DataAlt dc, [a,b], rhs)])
+         | isBoxedTupleTyCon (dataConTyCon dc)
+         , reifiableExpr rhs ->
+       do -- To start, require v to be unused. Later, extend.
+          unless (isDeadBinder wild) $
+            pprPanic "reify - case with live wild var" (ppr e)
+          -- letPairP :: forall a b c. Name# -> Name# -> EP (a :* b) -> EP c -> EP c
+          go =<< -- tryReify
+            liftA2 (\ rhs' scrut' -> varApps letPairV [varType a, varType b, rhsTy]
+                                       [nameA,nameB,rhs',scrut'])
+                   (tryReify (subst [(a,evalA),(b,evalB)] rhs))
+                   (tryReify scrut)
       where
-        tys = varType <$> [a,b]
-        v'  = zapIdOccInfo v
+        (nameA,evalA) = mkVar a
+        (nameB,evalB) = mkVar b
+        -- v --> ("v", eval (varP "v"))
+        mkVar :: Id -> (CoreExpr,CoreExpr)
+        mkVar v = (vstr, varApps evalV [vty] [varApps varV [vty] [vstr]])
+         where
+           vty  = varType     v
+           vstr = varNameExpr v
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut), Just meth <- hrMeth scrut
        -> tryReify $
@@ -156,8 +172,6 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
      -- variables. Could I instead transform just the constructor itself?
      -- 
    -- Helpers
-   stringExpr :: String -> CoreExpr
-   stringExpr str = {- Var unpackV `App` -} Lit (mkMachString str)
    mkReify :: Unop CoreExpr
    mkReify e = varApps reifyV [exprType e] [e]
    tryReify :: ReExpr
@@ -387,22 +401,24 @@ mkLamOps = do
       lookupExp   = lookupRdr (mkModuleName "ReificationRules.FOS")
       findExpId   = lookupExp lookupId
       findTupleId = lookupRdr (mkModuleName "Data.Tuple") lookupId
-  varV    <- findExpId "varP"
-  appV    <- findExpId "appP"
-  lamV    <- findExpId "lamP"
-  reifyV  <- findExpId "reifyP"
-  evalV   <- findExpId "evalP"
-  constV  <- findExpId "constP"
-  abstV   <- findExpId "abst"
-  reprV   <- findExpId "repr"
-  abst'V  <- findExpId "abst'"
-  repr'V  <- findExpId "repr'"
-  abstPV  <- findExpId "abstP"
-  reprPV  <- findExpId "reprP"
-  fstV    <- findTupleId "fst"
-  sndV    <- findTupleId "snd"
-  primMap <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
-                  stdMethMap
+  varV     <- findExpId "varP"
+  appV     <- findExpId "appP"
+  lamV     <- findExpId "lamP"
+  letV     <- findExpId "letP"
+  letPairV <- findExpId "letPairP"
+  reifyV   <- findExpId "reifyP"
+  evalV    <- findExpId "evalP"
+  constV   <- findExpId "constP"
+  abstV    <- findExpId "abst"
+  reprV    <- findExpId "repr"
+  abst'V   <- findExpId "abst'"
+  repr'V   <- findExpId "repr'"
+  abstPV   <- findExpId "abstP"
+  reprPV   <- findExpId "reprP"
+  fstV     <- findTupleId "fst"
+  sndV     <- findTupleId "snd"
+  primMap  <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
+                   stdMethMap
   let primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
                          <$> M.lookup (uqVarName v) primMap
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
@@ -537,3 +553,8 @@ isConApp _ = False
 
 -- TODO: More efficient isConApp, discarding args early.
 
+stringExpr :: String -> CoreExpr
+stringExpr = Lit . mkMachString
+
+varNameExpr :: Id -> CoreExpr
+varNameExpr = stringExpr . uniqVarName
