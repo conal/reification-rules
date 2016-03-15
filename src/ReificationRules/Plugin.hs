@@ -122,19 +122,6 @@ lintReExpr dflags expTy rew before | lintSteps =
        (lintExpr dflags (varSetElems (exprFreeVars before)) before)
 lintReExpr _ _ rew before = rew before
 
--- lintExpr :: DynFlags
---          -> [Var]               -- Treat these as in scope
---          -> CoreExpr
---          -> Maybe MsgDoc        -- Nothing => OK
-
--- lintReExpr dflags rew before =
---   case rew before of
---     Nothing -> Nothing
---     Just after ->
---       case lintExpr dflags [] before of
---         Nothing  -> Just after
---         Just doc -> pprPanic "reify post-transformation Lint" doc
-
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
 reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
                                           lintReExpr dflags expTy $
@@ -153,7 +140,7 @@ reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
          str = stringExpr (uniqVarName y)
          xty = varType x
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
-     Let (NonRec v rhs) body -> guard (reifiableExpr rhs) >>               -- TODO: try with "|"-style guard
+     Let (NonRec v rhs) body | reifiableExpr rhs ->
 #if 0
        go (Lam v body `App` rhs)
 #else
@@ -276,16 +263,6 @@ inlineMaybe = -- traceRewrite "unfold" $
               onAppsFun (-- traceRewrite "inline" $
                          maybeUnfoldingTemplate . realIdUnfolding)
 
--- inlineMaybe = traceRewrite "unfold" $
---               onAppsFun $ \ v ->
---   let unf        = realIdUnfolding v
---       templateMb = maybeUnfoldingTemplate unf
---   in
---     dtrace "inlineMaybe" (ppr v $$ text "realIdUnfolding =" <+> ppr unf
---                                 $$ text "maybeUnfoldingTemplate =" <+> ppr templateMb)
---      templateMb
-
-
 -- See match_inline from PrelRules, as used with 'inline'.
 
 hasUnfolding :: Id -> Bool
@@ -345,15 +322,12 @@ badTyConApp (tyConAppTyCon_maybe -> Just tc) = badTyCon tc
 badTyConApp _                                = False
 
 badTyCon :: TyCon -> Bool
--- badTyCon tc | pprTrace "badTyCon try" (ppr tc <+> text (qualifiedName (tyConName tc))) False = undefined
 badTyCon tc = qualifiedName (tyConName tc) `elem`
   [ "GHC.Integer.Type"
   , "GHC.Types.[]"
   , "GHC.Types.IO"
   , "ReificationRules.Exp.E"
   ]
-
--- ReificationRules.Exp.E
 
 reifiableExpr :: CoreExpr -> Bool
 reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
@@ -480,12 +454,12 @@ mkReifyEnv = do
    tyArg1 (tyConAppArgs_maybe -> Just [arg]) = arg
    tyArg1 ty = pprPanic "mkReifyEnv/tyArg1 non-unary" (ppr ty)
 
--- * Is it safe to reuse x's unique here? If not, use uniqAway x and then
--- setVarType. I can also avoid the issue by forming reify . f . eval. I could
--- include the Id for (.) in ReifyEnv. Or bundle reify <~ eval as reifyFun. We
--- might have to push to get (.) inlined promptly (perhaps with a reifyFun
--- rule). It'd be nice to preserve lambda-bound variable names, as in the
--- current implementation.
+-- * I'm assuming that it's safe to reuse x's unique here, since x is
+-- eliminated. If not, use uniqAway x and then setVarType.
+
+-- The next few functions extract types and tycons from the types of looked-up
+-- identifiers. I'd rather learn how to look up the types and tycons directly,
+-- as I do with (value) identifiers.
 
 expTyFromReifyTy :: Type -> Type
 expTyFromReifyTy reifyTy = expTy
@@ -556,7 +530,7 @@ toLitM (hasLitTc,toLitV) =
          lfun <$> buildDictionary hscEnv dflags guts inScope
                     (mkTyConApp hasLitTc [ty])
 
--- TODO: move the CoreM stuff hasRepMethodM and toLitM into calling code.
+-- TODO: move the CoreM stuff in hasRepMethodM and toLitM into calling code.
 
 -- TODO: refactor hasRepMethodM and toLitM.
 
