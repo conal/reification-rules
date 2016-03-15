@@ -37,9 +37,10 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import GhcPlugins
 import CoreArity (etaExpand)
+import CoreLint (lintExpr)
 import DynamicLoading
 import Kind (isLiftedTypeKind)
-import Type (coreView)
+import Type (coreView,mkAppTy)
 import TcType (isIntegerTy)
 import FamInstEnv (normaliseType)
 import SimplCore (simplifyExpr)
@@ -71,6 +72,7 @@ data LamOps = LamOps { varV       :: Id
                      , sndV       :: Id
                      , hasRepMeth :: HasRepMeth
                      , hasLit     :: HasLit
+                     , expTy      :: Type
                      }
 
 -- TODO: Perhaps drop reifyV, since it's in the rule
@@ -79,7 +81,11 @@ recursively :: Bool
 recursively = False -- True
 
 tracing :: Bool
-tracing = True -- False
+tracing = False -- True
+
+-- Whether to run Core Lint after every step
+lintSteps :: Bool
+lintSteps = True -- False
 
 dtrace :: String -> SDoc -> a -> a
 dtrace str doc | tracing   = pprTrace str doc
@@ -98,8 +104,39 @@ traceRewrite str f a = pprTrans str a <$> f a
 type Rewrite a = a -> Maybe a
 type ReExpr = Rewrite CoreExpr
 
+-- Apply a rewrite, lint the result, and check that the type is preserved.
+lintReExpr :: DynFlags -> Type -> Unop ReExpr
+lintReExpr dflags expTy rew before | lintSteps =
+  do after <- rew before
+     let oops str doc = pprPanic ("reify post-transfo check. " ++ str)
+                          (doc <> ppr before $$ text "-->" $$ ppr after)
+         beforeTy = mkAppTy expTy (exprType before)
+         afterTy  = exprType after
+     maybe (if beforeTy `eqType` afterTy then
+              return after
+            else
+              oops "type change" (ppr beforeTy <+> text "vs" <+> ppr afterTy
+                                  <+> text "in" $$ text ""))
+           (oops "Lint" empty)
+       (lintExpr dflags (varSetElems (exprFreeVars before)) before)
+lintReExpr _ _ rew before = rew before
+
+-- lintExpr :: DynFlags
+--          -> [Var]               -- Treat these as in scope
+--          -> CoreExpr
+--          -> Maybe MsgDoc        -- Nothing => OK
+
+-- lintReExpr dflags rew before =
+--   case rew before of
+--     Nothing -> Nothing
+--     Just after ->
+--       case lintExpr dflags [] before of
+--         Nothing  -> Just after
+--         Just doc -> pprPanic "reify post-transformation Lint" doc
+
 reify :: LamOps -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
-reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
+reify (LamOps {..}) guts dflags inScope = traceRewrite "reify" $
+                                          lintReExpr dflags expTy $
                                           go
  where
    go :: ReExpr
@@ -121,7 +158,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
 #else
        -- Alternatively use letP. Works but more complicated.
        -- letP :: forall a b. Name# -> EP a -> EP b -> EP b
-       liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType rhs]
+       liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType body]
                                  [name,rhs',body'])
               (tryReify rhs)
               (tryReify (subst1 v evald body))
@@ -154,7 +191,7 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
        -> tryReify $ Case scrut' v altsTy alts
      (repMeth <+ lit -> Just e) -> Just e
      -- Constructor applied to type-only arguments.
-     e@(collectTyArgs -> (Var (isDataConId_maybe -> Just dc),_))
+     e@(collectTyCoDictArgs -> (Var (isDataConId_maybe -> Just dc),_))
        | let (binds,body) = collectBinders (etaExpand (dataConRepArity dc) e)
        , Just meth <- hrMeth body
        -> do tryReify $
@@ -163,17 +200,18 @@ reify (LamOps {..}) guts dflags inScope = traceRewrite "reify"
      -- Primitive functions
      e@(collectTyArgs -> (Var v, tys))
        | j@(Just _) <- primFun (exprType e) v tys -> j
-     -- (repMeth <+ (tryReify <=< inlineMaybe) -> Just e) -> Just e
      -- reify (eval e) --> e.
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      -- Other applications
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
        varApps appV [dom,ran] <$> mapM tryReify [u,v]
-     _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
+     -- Last resort: try unfolding
+     (inlineMaybe -> Just e') -> tryReify e'
+     _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
-   -- TODO: Refactor to reduce the collectArgs applications.
-    -- v --> ("v", eval (varP "v"))
+   -- TODO: Refactor a bit to reduce the collectArgs applications.
+   -- v --> ("v", eval (varP "v"))
    mkVarEvald :: Id -> (CoreExpr,CoreExpr)
    mkVarEvald v = (vstr, varApps evalV [vty] [varApps varV [vty] [vstr]])
     where
@@ -433,6 +471,7 @@ mkLamOps = do
   toLitV <- findExpId "litE"
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
+  let expTy = expTyFromReifyTy (varType reifyV)
   return (LamOps { .. })
  where
    -- Used to extract Prim tycon argument
@@ -446,6 +485,12 @@ mkLamOps = do
 -- might have to push to get (.) inlined promptly (perhaps with a reifyFun
 -- rule). It'd be nice to preserve lambda-bound variable names, as in the
 -- current implementation.
+
+expTyFromReifyTy :: Type -> Type
+expTyFromReifyTy reifyTy = expTy
+ where
+   Just (_a,expA) = splitFunTy_maybe (dropForAlls reifyTy)
+   Just (expTy,_) = splitAppTy_maybe expA
 
 -- Extract HasRep and Rep from the type of abst
 repTcsFromAbstTy :: Type -> (TyCon,TyCon)
@@ -555,6 +600,18 @@ collectTyArgs = go []
  where
    go tys (App e (Type ty)) = go (ty:tys) e
    go tys e                 = (e,tys)
+
+collectArgsPred :: (CoreExpr -> Bool) -> CoreExpr -> (CoreExpr,[CoreExpr])
+collectArgsPred p = go []
+ where
+   go args (App fun arg) | p arg = go (arg:args) fun
+   go args e                     = (e,args)
+
+collectTyCoDictArgs :: CoreExpr -> (CoreExpr,[CoreExpr])
+collectTyCoDictArgs = collectArgsPred isTyCoDictArg
+
+isTyCoDictArg :: CoreExpr -> Bool
+isTyCoDictArg e = isTyCoArg e || isPredTy (exprType e)
 
 isConApp :: CoreExpr -> Bool
 isConApp (collectArgs -> (Var (isDataConId_maybe -> Just _), _)) = True
