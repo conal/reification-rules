@@ -48,31 +48,32 @@ ranksep n = ("ranksep",show n)
 type Okay = Uncurriable (:>) ()
 
 go :: Okay a => String -> a -> IO ()
-go = error "go: not implemented"
+go _ _ = error "go: not implemented"
 -- go name = go' name []
 {-# NOINLINE go #-}
 
 go' :: Okay a => String -> [Attr] -> a -> IO ()
-go' = error "go': not implemented"
+go' _ _ _ = error "go': not implemented"
 -- go' name attrs f = run name attrs (reifyP f)
 {-# NOINLINE go' #-}
 
 goSep :: Okay a => String -> Double -> a -> IO ()
-goSep = error "goSep: not implemented"
+goSep _ _ _ = error "goSep: not implemented"
 -- goSep name s = go' name [ranksep s]
 {-# NOINLINE goSep #-}
 
--- Experimenting with rules instead of INLINE.
+-- Use rules instead of INLINE so that we can "inline" these definitions before
+-- inlining begins. Otherwise, we'd lose our "primitives" before they can be
+-- reified.
+
+-- It's crucial that these error definitions are not CAFs. Otherwise, case
+-- alternatives disappear. See inquiry and explanation:
+-- <http://haskell.1045720.n5.nabble.com/Disappearing-case-alternative-td5832042.html>
 
 {-# RULES
 
-"go" forall name f. go name f = run name [] (reify f)
-
--- -- TODO: Try this one again
--- "go"    forall name         . go name          = go' name []
-
 "go'"   forall name attrs f . go' name attrs f = run name attrs (reify f)
-
+"go"    forall name         . go name          = go' name []
 "goSep" forall name s       . goSep name s     = go' name [ranksep s]
 
  #-}
