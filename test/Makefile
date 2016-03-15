@@ -21,7 +21,7 @@ GhcFlags += -fforce-recomp
 
 GhcFlags += -dsuppress-idinfo
 GhcFlags += -dsuppress-module-prefixes
-GhcFlags += -dsuppress-uniques
+# GhcFlags += -dsuppress-uniques
 
 # GhcFlags += -dsuppress-type-signatures
 # GhcFlags += -dsuppress-type-applications
