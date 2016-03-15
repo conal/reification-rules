@@ -32,6 +32,7 @@ module ReificationRules.Exp where
 
 import Control.Arrow (first)
 import Data.Maybe (fromMaybe,catMaybes,listToMaybe)
+import Data.Char (isDigit)
 
 import System.IO.Unsafe (unsafePerformIO)  -- experiment
 
@@ -266,27 +267,15 @@ renameVars e0 = huh $
    renamePat (u :@ v) = (:@) <$> renamePat u <*> renamePat v
 {-# NOINLINE renameVars #-}
 
--- Names look like foo_suff. Drop the suffix.
+-- Names look like foo_suff. Drop the suffix and then any trailing digits.
 -- Keep consistent with fqVarName in Plugin.
 stripName :: Unop Name
-stripName name = -- trace ("stripName " ++ show name) $
-                 reverse . tail' . dropWhile (/= '_') . reverse $ name
+stripName name = reverse
+               . dropWhile isDigit 
+               . tail' 
+               . dropWhile (/= '_') 
+               . reverse
+               $ name
  where
    tail' [] = error ("stripName: missing suffix in " ++ show name)
    tail' (_:cs) = cs
-
-#if 0
-
-data E :: (* -> *) -> (* -> *) where
-  Var     :: V a -> E p a
-  ConstE  :: p a -> E p a
-  (:^)    :: E p (a -> b) -> E p a -> E p b
-  Lam     :: Pat a -> E p b -> E p (a -> b)
-
-data Pat :: * -> * where
-  UnitPat :: Pat Unit
-  VarPat  :: V a -> Pat a
-  (:$)    :: Pat a -> Pat b -> Pat (a :* b)
-  (:@)    :: Pat a -> Pat a -> Pat a
-
-#endif
