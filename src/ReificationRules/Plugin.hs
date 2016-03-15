@@ -53,27 +53,28 @@ import ReificationRules.Simplify (simplifyE)
     Reification
 --------------------------------------------------------------------}
 
--- Reification operations
-data LamOps = LamOps { varV       :: Id
-                     , appV       :: Id
-                     , lamV       :: Id
-                     , letV       :: Id
-                     , letPairV   :: Id
-                     , reifyV     :: Id
-                     , evalV      :: Id
-                     , primFun    :: PrimFun
-                     , abstV      :: Id
-                     , reprV      :: Id
-                     , abst'V     :: Id
-                     , repr'V     :: Id
-                     , abstPV     :: Id
-                     , reprPV     :: Id
-                     , fstV       :: Id
-                     , sndV       :: Id
-                     , hasRepMeth :: HasRepMeth
-                     , hasLit     :: HasLit
-                     , expTy      :: Type
-                     }
+-- Information needed for reification. We construct this info in
+-- CoreM and use it in the reify rule, which must be pure.
+data ReifyEnv = ReifyEnv { varV       :: Id
+                         , appV       :: Id
+                         , lamV       :: Id
+                         , letV       :: Id
+                         , letPairV   :: Id
+                         , reifyV     :: Id
+                         , evalV      :: Id
+                         , primFun    :: PrimFun
+                         , abstV      :: Id
+                         , reprV      :: Id
+                         , abst'V     :: Id
+                         , repr'V     :: Id
+                         , abstPV     :: Id
+                         , reprPV     :: Id
+                         , fstV       :: Id
+                         , sndV       :: Id
+                         , hasRepMeth :: HasRepMeth
+                         , hasLit     :: HasLit
+                         , expTy      :: Type
+                         }
 
 -- TODO: Perhaps drop reifyV, since it's in the rule
 
@@ -134,8 +135,8 @@ lintReExpr _ _ rew before = rew before
 --         Nothing  -> Just after
 --         Just doc -> pprPanic "reify post-transformation Lint" doc
 
-reify :: LamOps -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
-reify (LamOps {..}) guts dflags inScope = traceRewrite "reify" $
+reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
+reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
                                           lintReExpr dflags expTy $
                                           go
  where
@@ -408,9 +409,9 @@ stdMethMap = M.fromList $
 --------------------------------------------------------------------}
 
 mkReifyRule :: CoreM (ModGuts -> CoreRule)
-mkReifyRule = reRule <$> mkLamOps
+mkReifyRule = reRule <$> mkReifyEnv
  where
-   reRule :: LamOps -> ModGuts -> CoreRule
+   reRule :: ReifyEnv -> ModGuts -> CoreRule
    reRule ops guts =
      BuiltinRule { ru_name  = fsLit "reify"
                  , ru_fn    = varName (reifyV ops)
@@ -433,8 +434,8 @@ install _opts todos =
 
 type PrimFun = Type -> Id -> [Type] -> Maybe CoreExpr
 
-mkLamOps :: CoreM LamOps
-mkLamOps = do
+mkReifyEnv :: CoreM ReifyEnv
+mkReifyEnv = do
   hsc_env <- getHscEnv
   let lookupRdr :: ModuleName -> (Name -> CoreM a) -> String -> CoreM a
       lookupRdr modu mk str =
@@ -472,16 +473,16 @@ mkLamOps = do
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
   let expTy = expTyFromReifyTy (varType reifyV)
-  return (LamOps { .. })
+  return (ReifyEnv { .. })
  where
    -- Used to extract Prim tycon argument
    tyArg1 :: Unop Type
    tyArg1 (tyConAppArgs_maybe -> Just [arg]) = arg
-   tyArg1 ty = pprPanic "mkLamOps/tyArg1 non-unary" (ppr ty)
+   tyArg1 ty = pprPanic "mkReifyEnv/tyArg1 non-unary" (ppr ty)
 
 -- * Is it safe to reuse x's unique here? If not, use uniqAway x and then
 -- setVarType. I can also avoid the issue by forming reify . f . eval. I could
--- include the Id for (.) in LamOps. Or bundle reify <~ eval as reifyFun. We
+-- include the Id for (.) in ReifyEnv. Or bundle reify <~ eval as reifyFun. We
 -- might have to push to get (.) inlined promptly (perhaps with a reifyFun
 -- rule). It'd be nice to preserve lambda-bound variable names, as in the
 -- current implementation.
