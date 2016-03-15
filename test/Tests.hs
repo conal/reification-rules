@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase, GADTs #-}
 
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures #-}
 
@@ -21,9 +21,11 @@
 
 -- TODO: explicit exports
 
+import Data.Foldable
+
 import ReificationRules.Misc (Unop,Binop,BinRel)
 import ReificationRules.FOS (EP,repr,abst,reify)
-import ReificationRules.Run (run,Okay)
+import ReificationRules.Run (go,Okay)
 
 import Circat.Doubli
 
@@ -35,7 +37,9 @@ import Circat.RTree
 import qualified Circat.Rep as R -- TEMP
 
 main :: IO ()
-main = print (reify t)
+
+--- main = print (reify t)
+main = go "foo" t
 
 {--------------------------------------------------------------------
     Working examples
@@ -71,12 +75,6 @@ main = print (reify t)
 -- t :: Int -> Bool -> (Bool,Int)
 -- t x y = (y,x)
 
--- t :: Int
--- t = 3
-
--- t :: Doubli
--- t = 3.0
-
 -- t (p :: (Int,Bool)) = (snd p, fst p)
 
 -- t = (5,6) :: (Int,Int)
@@ -87,6 +85,8 @@ main = print (reify t)
 
 -- t = abst :: (Int,Int) -> Pair Int
 
+-- t = repr :: Pair Int -> (Int,Int)
+
 -- t = 3 :# 5 :: Pair Int
 
 -- t (x :: Int) = y * y where y = x + x
@@ -95,23 +95,37 @@ main = print (reify t)
 
 -- t = \ case (B ts :: Tree N2 Int) -> ts
 
-t = (1 +) :: Unop Int
+-- t = (1 +) :: Unop Int
 
 -- t = (+ 1) :: Unop Int
+
+-- t = (:#) :: Int -> Int -> Pair Int
+
+-- t x = 2 :# (3 * x) :: Pair Int
+
+-- t = fmap :: (Int -> Bool) -> Pair Int -> Pair Bool
+
+-- t = fmap not :: Unop (Pair Bool)
+
+-- t = fmap :: (Int -> Bool) -> Tree N0 Int -> Tree N0 Bool
+
+-- t = fmap :: (Int -> Bool) -> Tree N4 Int -> Tree N4 Bool
+
+t = fmap not :: Unop (Tree N4 Bool)
+
+{--------------------------------------------------------------------
+    In progress
+--------------------------------------------------------------------}
 
 {--------------------------------------------------------------------
     Non-working examples
 --------------------------------------------------------------------}
 
--- -- The constructor arguments get simplified with inlining, including $fNumInt_$c*.
--- t x = 2 :# (3 * x) :: Pair Int
+-- -- Unhandled cast expression.
+-- t = sum :: Tree N4 Int -> Int
 
--- -- I don't yet handle Double. To do: switch from Doubli to Double in Circat
+-- -- I don't yet handle Double. To do: switch from Doubli to Double in circat.
 -- t :: Double -> Double -> Bool
 -- t = \ x y -> x > y + 3
 
--- -- Unsaturated non-standard constructor
--- t = (:#) :: Int -> Int -> Pair Int
-
--- -- I'm not yet inlining reify args
--- t = fmap :: (Int -> Bool) -> Pair Int -> Pair Bool
+-- t = 3.0 :: Doubli
