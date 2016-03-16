@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase, GADTs #-}
+{-# LANGUAGE LambdaCase, GADTs, TypeOperators #-}
 
 {-# OPTIONS_GHC -Wall -fno-warn-missing-signatures #-}
 
@@ -23,6 +23,8 @@
 
 import Data.Foldable
 
+import Data.Monoid
+
 import ReificationRules.Misc (Unop,Binop,BinRel)
 import ReificationRules.FOS (EP,repr,abst,reify)
 import ReificationRules.Run (go,Okay)
@@ -38,7 +40,8 @@ import qualified Circat.Rep as R -- TEMP
 
 main :: IO ()
 
---- main = print (reify t)
+-- main = print (reify t)
+
 main = go "foo" t
 
 {--------------------------------------------------------------------
@@ -111,7 +114,19 @@ main = go "foo" t
 
 -- t = fmap :: (Int -> Bool) -> Tree N4 Int -> Tree N4 Bool
 
-t = fmap not :: Unop (Tree N4 Bool)
+-- t = fmap not :: Unop (Tree N4 Bool)
+
+-- t = Sum (3 :: Int)
+
+-- t = getSum :: Sum Int -> Int
+
+-- t = \ (Sum (x :: Int)) -> Sum (x + 1)
+
+-- t = \ (Sum (x :: Int)) (Sum (y :: Int)) -> Sum (y + x)
+
+-- t = mappend :: Binop (Sum Int)
+
+t = sum :: Tree N10 Int -> Int
 
 {--------------------------------------------------------------------
     In progress
@@ -120,9 +135,6 @@ t = fmap not :: Unop (Tree N4 Bool)
 {--------------------------------------------------------------------
     Non-working examples
 --------------------------------------------------------------------}
-
--- -- Unhandled cast expression.
--- t = sum :: Tree N4 Int -> Int
 
 -- -- I don't yet handle Double. To do: switch from Doubli to Double in circat.
 -- t :: Double -> Double -> Bool
