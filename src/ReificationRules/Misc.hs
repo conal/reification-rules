@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeOperators, TypeFamilies, MultiParamTypeClasses, CPP #-}
+{-# LANGUAGE ExplicitForAll    #-}
 {-# OPTIONS_GHC -Wall #-}
 
 -- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
@@ -18,7 +19,7 @@
 
 module ReificationRules.Misc
   ( module Circat.Misc
-  , BinRel
+  , BinRel, (-->)
   , Eq1'(..), (===?)
   , PrimBasics(..), Evalable(..)
   ) where
@@ -30,6 +31,13 @@ import Data.Proof.EQ ((:=:)(..))
 import Circat.Misc hiding (Evalable(..))
 
 type BinRel a = a -> a -> Bool
+
+-- | Add pre- and post-processing.
+-- Used dynamically by recast.
+(-->) :: forall a b a' b'. (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
+(f --> h) g = h . g . f
+-- f --> h = \ g x -> h (g (f x))
+{-# INLINE (-->) #-}
 
 {--------------------------------------------------------------------
     Equality
