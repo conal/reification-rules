@@ -57,11 +57,6 @@ var# addr = V (unpackCString# addr)
 
 varP :: Name# -> EP a
 varP addr = Var (var# addr)
-
--- -- Experiment
--- varP :: EP a
--- varP = Var (V "missing name")
-
 {-# NOINLINE varP #-}
 
 constP :: forall a. Prim a -> EP a
@@ -116,6 +111,8 @@ evalP = evalE
 
 -- abst :: HasRep a => Rep a -> a
 -- repr :: HasRep a => a -> Rep a
+
+-- TODO: Try simpler signatures, now that I'm handling casts.
 
 abst :: (HasRep a, Rep a ~~ a') => a' -> a
 repr :: (HasRep a, Rep a ~~ a') => a -> a'
