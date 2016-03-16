@@ -11,6 +11,7 @@ go: Tests Makefile ../dist
 GhcFlags += -fexpose-all-unfoldings
 GhcFlags += -dcore-lint
 GhcFlags += -fforce-recomp
+# GhcFlags += -dppr-case-as-let
 
 # GhcFlags += -ddump-simpl
 
@@ -21,7 +22,7 @@ GhcFlags += -fforce-recomp
 
 GhcFlags += -dsuppress-idinfo
 GhcFlags += -dsuppress-module-prefixes
-# GhcFlags += -dsuppress-uniques
+GhcFlags += -dsuppress-uniques
 
 # GhcFlags += -dsuppress-type-signatures
 # GhcFlags += -dsuppress-type-applications
@@ -37,7 +38,7 @@ GhcFlags += -dsuppress-module-prefixes
 
 # GhcFlags += -dverbose-core2core
 
-GhcFlags += -fprint-explicit-kinds -fprint-equality-relations
+# GhcFlags += -fprint-explicit-kinds -fprint-equality-relations
 
 Tests: ../dist Tests.hs Makefile
 	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
@@ -47,8 +48,6 @@ RuleTest: ../dist RuleTest.hs Makefile
 
 RT: ../dist RT.hs Makefile
 	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
-
-# -ddump-rule-rewrites
 
 shaped:
 	cd ../../shaped-types ; make
