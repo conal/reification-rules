@@ -161,17 +161,17 @@ reify env@(ReifyEnv {..}) guts dflags inScope =
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
      AboutTo("let")
      Let (NonRec v rhs) body
-        | not (reifiableExpr rhs) -> Let (NonRec v rhs) <$> tryReify body
-        | isEvalVar rhs -> go (subst1 v rhs body)
+        | not (reifiableExpr rhs) || isEvalVar rhs -> Let (NonRec v rhs) <$> tryReify body
+       -- | isEvalVar rhs -> go (subst1 v rhs body)
        -- The not.isEvalVar test prevents a simplifier loop that keeps
        -- let-abstracting terms of the form evalP (varP x). The immediate go
        -- delays GHC re-hoisting long enough to avoid an infinite loop. See
        -- journal entry 2016-03-15.
         | otherwise ->
-#if 1
+#if 0
           go (Lam v body `App` rhs)
 #else
-          -- Alternatively use letP. Works but more complicated.
+          -- Alternatively use letP. Works as well but more complicated.
           -- letP :: forall a b. Name# -> EP a -> EP b -> EP b
           let (name,evald) = mkVarEvald v in
             liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType body]
@@ -404,25 +404,26 @@ recast (ReifyEnv {..}) guts dflags inScope = -- traceRewrite "recast" .
   go
  where
    go :: Coercion -> Maybe CoreExpr
-   go (Refl _r ty) = Just (inlined (varApps idV [ty] []))
+   go (Refl _r ty) = Just (inlined' (varApps idV [ty] []))
    go (FunCo _r domCo ranCo) =
      liftA2 mkPrePost (go (mkSymCo domCo)) (go ranCo) -- co/contravariant
     where
-      mkPrePost f g = inlined $ varApps prePostV [a,b,a',b'] [f,g]
+      mkPrePost f g = inlined' $ varApps prePostV [a,b,a',b'] [f,g]
        where
-         Just (a,a') = splitFunTy_maybe (exprType f)
+         -- (-->) :: forall a b a' b'.
+         --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
+         Just (a',a) = splitFunTy_maybe (exprType f)
          Just (b,b') = splitFunTy_maybe (exprType g)
    go co@(       AxiomInstCo {} ) = goRep reprV pFst co
    go co@(SymCo (AxiomInstCo {})) = goRep abstV pSnd co
-   -- TODO: refactor
    -- Panic for now, to reduce output.
    -- Maybe stick with the panic, and drop the Maybe.
    go co = pprPanic "recast: unhandled coercion" (ppr co)
-   goRep v get co =
-     ($ v) <$> hasRepMeth dflags guts inScope (get (coercionKind co))
-
 --    go co = dtrace "recast: unhandled coercion" (ppr co) $
 --            Nothing
+   goRep v get co =
+     ($ v) <$> hasRepMeth dflags guts inScope (get (coercionKind co))
+   inlined' = inlined -- id
 
 -- TODO: Maybe move recast into reify and drop explicit args.
 
