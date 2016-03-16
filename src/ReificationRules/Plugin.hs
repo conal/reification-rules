@@ -92,7 +92,7 @@ recursively :: Bool
 recursively = False -- True
 
 tracing :: Bool
-tracing = True -- False
+tracing = False -- True
 
 -- Whether to run Core Lint after every step
 lintSteps :: Bool
@@ -139,7 +139,7 @@ lintReExpr _ _ rew before = rew before
 -- Use of e in a dtrace argument prevents the dtrace call from getting hoisted.
 
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
-reify env@(ReifyEnv {..}) guts dflags inScope =
+reify (ReifyEnv {..}) guts dflags inScope =
   traceRewrite "reify" $
   lintReExpr dflags expTy $
   go
@@ -208,7 +208,7 @@ reify env@(ReifyEnv {..}) guts dflags inScope =
        | Just scrut' <- inlineMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
      AboutTo("cast")
-     Cast e co -> tryReify =<< (`App` e) <$> recast env guts dflags inScope co
+     Cast e co -> tryReify =<< (`App` e) <$> recast co
      AboutTo("repMeth <+ lit")
      (repMeth <+ lit -> Just e) -> Just e
      AboutTo("abstReprCon")
@@ -291,6 +291,28 @@ reify env@(ReifyEnv {..}) guts dflags inScope =
          e' = traceUnop ("simplify " ++ show inlining ++ ", pass " ++ show n)
               (simplifyE dflags inlining) e
 #endif
+   -- Convert a coercion (being used in a cast) to an equivalent Core function to
+   -- apply.
+   recast :: Coercion -> Maybe CoreExpr
+   recast (Refl _r ty) = Just (inlined (varApps idV [ty] []))
+   recast (FunCo _r domCo ranCo) =
+     liftA2 mkPrePost (recast (mkSymCo domCo)) (recast ranCo) -- co/contravariant
+    where
+      mkPrePost f g = inlined $ varApps prePostV [a,b,a',b'] [f,g]
+       where
+         -- (-->) :: forall a b a' b'.
+         --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
+         Just (a',a) = splitFunTy_maybe (exprType f)
+         Just (b,b') = splitFunTy_maybe (exprType g)
+   recast co@(       AxiomInstCo {} ) = recastRep reprV pFst co
+   recast co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
+   -- Panic for now, to reduce output.
+   -- Maybe stick with the panic, and drop the Maybe.
+   recast co = pprPanic "recast: unhandled coercion" (ppr co)
+--    recast co = dtrace "recast: unhandled coercion" (ppr co) $
+--            Nothing
+   recastRep v get co =
+     ($ v) <$> hasRepMeth dflags guts inScope (get (coercionKind co))
 
 
 -- TODO: Should I unfold (inline application head) earlier? Doing so might
@@ -378,41 +400,6 @@ badTyCon tc = qualifiedName (tyConName tc) `elem`
 
 reifiableExpr :: CoreExpr -> Bool
 reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
-
-{--------------------------------------------------------------------
-    Casts
---------------------------------------------------------------------}
-
--- Convert a coercion (being used in a cast) to an equivalent Core function to
--- apply.
-recast :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv
-       -> Coercion -> Maybe CoreExpr
-recast (ReifyEnv {..}) guts dflags inScope = -- traceRewrite "recast" .
-  go
- where
-   go :: Coercion -> Maybe CoreExpr
-   go (Refl _r ty) = Just (inlined' (varApps idV [ty] []))
-   go (FunCo _r domCo ranCo) =
-     liftA2 mkPrePost (go (mkSymCo domCo)) (go ranCo) -- co/contravariant
-    where
-      mkPrePost f g = inlined' $ varApps prePostV [a,b,a',b'] [f,g]
-       where
-         -- (-->) :: forall a b a' b'.
-         --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
-         Just (a',a) = splitFunTy_maybe (exprType f)
-         Just (b,b') = splitFunTy_maybe (exprType g)
-   go co@(       AxiomInstCo {} ) = goRep reprV pFst co
-   go co@(SymCo (AxiomInstCo {})) = goRep abstV pSnd co
-   -- Panic for now, to reduce output.
-   -- Maybe stick with the panic, and drop the Maybe.
-   go co = pprPanic "recast: unhandled coercion" (ppr co)
---    go co = dtrace "recast: unhandled coercion" (ppr co) $
---            Nothing
-   goRep v get co =
-     ($ v) <$> hasRepMeth dflags guts inScope (get (coercionKind co))
-   inlined' = inlined -- id
-
--- TODO: Maybe move recast into reify and drop explicit args.
 
 {--------------------------------------------------------------------
     Primitive translation
