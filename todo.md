@@ -2,9 +2,12 @@
 
 The code contains several "`TODO`" comments, some of which are also listed below.
 
-
-*   In `Plugin`, add and stack of unreified arguments.
+*   In `Plugin`, explore adding a stack of unreified arguments.
     When reifying a lambda, try to make a `let`.
+*   Alternatively (I think), try unfolding (inlining application head) earlier.
+    Doing so might result in much simpler generated code by avoiding many beta-redexes.
+    If I do, take care not to inline "primitives".
+    I think it'd be fairly easy.
 *   Reification breakages:
     *   Unfold reify argument.
     *   `Double`: switch from `Doubli` to `Double` in circat.
@@ -12,4 +15,3 @@ The code contains several "`TODO`" comments, some of which are also listed below
 *   Now that I have *non-recursive* reification working well, consider converting some aspects back to separate, syntax-based rules (with the `RULES` pragma).
 *   In `Plugin`, learn how to look up types and tycons directly, as I do with (value) identifiers.
     Then remove the code that extract types and tycons from the types of looked-up identifiers (`expTyFromReifyTy` etc).
-
