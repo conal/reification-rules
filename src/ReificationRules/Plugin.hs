@@ -329,17 +329,14 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- See match_inline from PrelRules, as used with 'inline'.
    inlineable :: Id -> Bool
    inlineable = isJust . inlineMaybe
-
+   -- Tracing
    dtrace :: String -> SDoc -> a -> a
    dtrace str doc | tracing   = pprTrace str doc
                   | otherwise = id
-
    pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
    pprTrans str a b = dtrace str (ppr a $$ text "-->" $$ ppr b) b
-
    traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
    traceUnop str f a = pprTrans str a (f a)
-
    traceRewrite :: (Outputable a, Outputable b, Functor f) =>
                    String -> Unop (a -> f b)
    traceRewrite str f a = pprTrans str a <$> f a
@@ -469,8 +466,8 @@ stdMethMap = M.fromList $
     Plugin installation
 --------------------------------------------------------------------}
 
-mkReifyRule :: CoreM (ModGuts -> CoreRule)
-mkReifyRule = reRule <$> mkReifyEnv
+mkReifyRule :: [CommandLineOption] -> CoreM (ModGuts -> CoreRule)
+mkReifyRule opts = reRule <$> mkReifyEnv opts
  where
    reRule :: ReifyEnv -> ModGuts -> CoreRule
    reRule ops guts =
@@ -485,9 +482,9 @@ plugin :: Plugin
 plugin = defaultPlugin { installCoreToDos = install }
 
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
-install _opts todos =
+install opts todos =
   do reinitializeGlobals
-     rr <- mkReifyRule
+     rr <- mkReifyRule opts
      -- For now, just insert the rule.
      -- TODO: add "reify_" bindings and maybe rules.
      let pass guts = pure (on_mg_rules (rr guts :) guts)
@@ -495,8 +492,9 @@ install _opts todos =
 
 type PrimFun = Type -> Id -> [Type] -> Maybe CoreExpr
 
-mkReifyEnv :: CoreM ReifyEnv
-mkReifyEnv = do
+mkReifyEnv :: [CommandLineOption] -> CoreM ReifyEnv
+mkReifyEnv opts = do
+  -- liftIO $ putStrLn ("Options: " ++ show opts)
   hsc_env <- getHscEnv
   let lookupRdr :: ModuleName -> (Name -> CoreM a) -> String -> CoreM a
       lookupRdr modu mk str =
@@ -541,7 +539,7 @@ mkReifyEnv = do
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
   let expTy = expTyFromReifyTy (varType reifyV)
-  let tracing = True                    -- TODO: get from plugin argument
+  let tracing = "trace" `elem` opts
   return (ReifyEnv { .. })
  where
    -- Used to extract Prim tycon argument
