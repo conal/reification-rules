@@ -301,9 +301,6 @@ onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
 onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
 onAppsFun _ _ = Nothing
 
--- simpleOptE :: Unop CoreExpr
--- simpleOptE = traceUnop "simpleOptExpr" simpleOptExpr
-
 inlined :: Unop CoreExpr
 inlined e = fromMaybe e (inlineMaybe e)               
 
@@ -386,18 +383,8 @@ reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
     Casts
 --------------------------------------------------------------------}
 
--- reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
--- reify (ReifyEnv {..}) guts dflags inScope = ...
-
 -- Convert a coercion (being used in a cast) to an equivalent Core function to
 -- apply.
-
--- DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
-
--- reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
-
--- type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
-
 recast :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv
        -> Coercion -> Maybe CoreExpr
 recast (ReifyEnv {..}) guts dflags inScope = -- traceRewrite "recast" .
@@ -426,11 +413,6 @@ recast (ReifyEnv {..}) guts dflags inScope = -- traceRewrite "recast" .
    inlined' = inlined -- id
 
 -- TODO: Maybe move recast into reify and drop explicit args.
-
-
--- recast: unhandled coercion N:Sum[0] <Int>_R
-
--- recast: unhandled coercion <Tree (S N0) Int>_R -> N:Sum[0] <Int>_R
 
 {--------------------------------------------------------------------
     Primitive translation
