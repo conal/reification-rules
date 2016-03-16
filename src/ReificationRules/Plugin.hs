@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards     #-}
+{-# LANGUAGE PatternSynonyms   #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE ViewPatterns      #-}
 
@@ -38,12 +39,15 @@ import System.IO.Unsafe (unsafePerformIO)
 import GhcPlugins
 import CoreArity (etaExpand)
 import CoreLint (lintExpr)
+import CoreSeq (seqExpr)
 import DynamicLoading
 import Kind (isLiftedTypeKind)
+import Pair (Pair(..))
 import Type (coreView,mkAppTy)
 import TcType (isIntegerTy)
 import FamInstEnv (normaliseType)
 import SimplCore (simplifyExpr)
+import TyCoRep                          -- TODO: explicit imports
 
 import ReificationRules.Misc (Unop,Binop)
 import ReificationRules.BuildDictionary (buildDictionary,mkEqBox)
@@ -71,6 +75,9 @@ data ReifyEnv = ReifyEnv { varV       :: Id
                          , reprPV     :: Id
                          , fstV       :: Id
                          , sndV       :: Id
+                         , idV        :: Id
+                         , composeV   :: Id
+                         , prePostV   :: Id
                          , hasRepMeth :: HasRepMeth
                          , hasLit     :: HasLit
                          , expTy      :: Type
@@ -78,11 +85,14 @@ data ReifyEnv = ReifyEnv { varV       :: Id
 
 -- TODO: Perhaps drop reifyV, since it's in the rule
 
+-- TODO: try replacing the identifiers with convenient functions that use them,
+-- thus shifting some complexity from reify to mkReifyEnv. 
+
 recursively :: Bool
 recursively = False -- True
 
 tracing :: Bool
-tracing = False -- True
+tracing = True -- False
 
 -- Whether to run Core Lint after every step
 lintSteps :: Bool
@@ -122,16 +132,24 @@ lintReExpr dflags expTy rew before | lintSteps =
        (lintExpr dflags (varSetElems (exprFreeVars before)) before)
 lintReExpr _ _ rew before = rew before
 
+-- #define AboutTo(str) e | dtrace ("About to " ++ (str)) (e `seq` empty) False -> undefined
+
+#define AboutTo(str)
+
+-- Use of e in a dtrace argument prevents the dtrace call from getting hoisted.
+
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
-reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
-                                          lintReExpr dflags expTy $
-                                          go
+reify env@(ReifyEnv {..}) guts dflags inScope =
+  traceRewrite "reify" $
+  lintReExpr dflags expTy $
+  go
  where
    go :: ReExpr
    go = \ case 
-     e | dtrace "reify go:" (ppr e) False -> undefined
+     -- e | dtrace "reify go:" (ppr e) False -> undefined
      -- lamP :: forall a b. Name# -> EP b -> EP (a -> b)
      -- (\ x -> e) --> lamP "x" e[x/eval (var "x")]
+     AboutTo("lambda")
      Lam x e | not (isTyVar x) ->
        do let x' = varApps varV [xty] [str]
           e' <- tryReify (subst1 x (varApps evalV [xty] [x']) e)
@@ -140,6 +158,7 @@ reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
          str = stringExpr (uniqVarName y)
          xty = varType x
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
+     AboutTo("let")
      Let (NonRec v rhs) body | reifiableExpr rhs ->
 #if 0
        go (Lam v body `App` rhs)
@@ -150,11 +169,13 @@ reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
                                  [name,rhs',body'])
               (tryReify rhs)
               (tryReify (subst1 v evald body))
+       | otherwise -> Let (NonRec v rhs) <$> tryReify body
       where
         (name,evald) = mkVarEvald v
 #endif
-       -- TODO: Use letV instead
+     AboutTo("case-of-case")
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
+     AboutTo("pair scrutinee")
      e@(Case scrut wild rhsTy [(DataAlt dc, [a,b], rhs)])
          | isBoxedTupleTyCon (dataConTyCon dc)
          , reifiableExpr rhs ->
@@ -170,14 +191,21 @@ reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
       where
         (nameA,evalA) = mkVarEvald a
         (nameB,evalB) = mkVarEvald b
+     AboutTo("abstReprCase")
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut)
        , Just meth <- hrMeth scrut
        -> tryReify $
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
+     AboutTo("unfold scrutinee")
+     Case scrut v altsTy alts
        | Just scrut' <- inlineMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
+     AboutTo("cast")
+     Cast e co -> tryReify =<< (`App` e) <$> recast env guts dflags inScope co
+     AboutTo("repMeth <+ lit")
      (repMeth <+ lit -> Just e) -> Just e
+     AboutTo("abstReprCon")
      -- Constructor applied to type-only arguments.
      e@(collectTyCoDictArgs -> (Var (isDataConId_maybe -> Just dc),_))
        | let (binds,body) = collectBinders (etaExpand (dataConRepArity dc) e)
@@ -185,16 +213,23 @@ reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
        -> do tryReify $
                mkLams binds $
                  meth abstV `App` (simplE True (meth repr'V `App` body))
+     AboutTo("primitive")
      -- Primitive functions
      e@(collectTyArgs -> (Var v, tys))
        | j@(Just _) <- primFun (exprType e) v tys -> j
      -- reify (eval e) --> e.
+     AboutTo("eval")
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      -- Other applications
+     AboutTo("app")
      App u v | not (isTyCoArg v)
-             , Just (dom,ran) <- splitFunTy_maybe (exprType u) ->
-       varApps appV [dom,ran] <$> mapM tryReify [u,v]
+             , Just (dom,ran) <- splitFunTy_maybe (exprType u)
+             , Just reU <- tryReify u
+             , Just reV <- tryReify v
+       ->
+        Just (varApps appV [dom,ran] [reU,reV])
      -- Last resort: try unfolding
+     AboutTo("inline")
      (inlineMaybe -> Just e') -> tryReify e'
      _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
@@ -229,9 +264,6 @@ reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
-   -- Inline when possible.
-   inlined :: Unop CoreExpr
-   inlined e = fromMaybe e (inlineMaybe e)               
    -- Simplify to fixed point
    simplE :: Bool -> Unop CoreExpr
 #if 1
@@ -249,6 +281,12 @@ reify (ReifyEnv {..}) guts dflags inScope = traceRewrite "reify" $
               (simplifyE dflags inlining) e
 #endif
 
+
+-- TODO: Should I unfold (inline application head) earlier? Doing so might
+-- result in much simpler generated code by avoiding many beta-redexes. If I
+-- do, take care not to inline "primitives". I think it'd be fairly easy.
+
+
 onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
 onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
 onAppsFun _ _ = Nothing
@@ -256,9 +294,11 @@ onAppsFun _ _ = Nothing
 -- simpleOptE :: Unop CoreExpr
 -- simpleOptE = traceUnop "simpleOptExpr" simpleOptExpr
 
+inlined :: Unop CoreExpr
+inlined e = fromMaybe e (inlineMaybe e)               
+
 -- Inline application head, if possible.
 inlineMaybe :: ReExpr
-
 inlineMaybe = -- traceRewrite "unfold" $
               onAppsFun (-- traceRewrite "inline" $
                          maybeUnfoldingTemplate . realIdUnfolding)
@@ -331,6 +371,55 @@ badTyCon tc = qualifiedName (tyConName tc) `elem`
 
 reifiableExpr :: CoreExpr -> Bool
 reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
+
+{--------------------------------------------------------------------
+    Casts
+--------------------------------------------------------------------}
+
+-- reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
+-- reify (ReifyEnv {..}) guts dflags inScope = ...
+
+-- Convert a coercion (being used in a cast) to an equivalent Core function to
+-- apply.
+
+-- DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
+
+-- reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
+
+-- type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
+
+recast :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv
+       -> Coercion -> Maybe CoreExpr
+recast (ReifyEnv {..}) guts dflags inScope = -- traceRewrite "recast" .
+  go
+ where
+   go :: Coercion -> Maybe CoreExpr
+   go (Refl _r ty) = Just (inlined (varApps idV [ty] []))
+   go (FunCo _r domCo ranCo) =
+     liftA2 mkPrePost (go (mkSymCo domCo)) (go ranCo) -- co/contravariant
+    where
+      mkPrePost f g = inlined $ varApps prePostV [a,b,a',b'] [f,g]
+       where
+         Just (a,a') = splitFunTy_maybe (exprType f)
+         Just (b,b') = splitFunTy_maybe (exprType g)
+   go co@(       AxiomInstCo {} ) = goRep reprV pFst co
+   go co@(SymCo (AxiomInstCo {})) = goRep abstV pSnd co
+   -- TODO: refactor
+   -- Panic for now, to reduce output.
+   -- Maybe stick with the panic, and drop the Maybe.
+   go co = pprPanic "recast: unhandled coercion" (ppr co)
+   goRep v get co =
+     ($ v) <$> hasRepMeth dflags guts inScope (get (coercionKind co))
+
+--    go co = dtrace "recast: unhandled coercion" (ppr co) $
+--            Nothing
+
+-- TODO: Maybe move recast into reify and drop explicit args.
+
+
+-- recast: unhandled coercion N:Sum[0] <Int>_R
+
+-- recast: unhandled coercion <Tree (S N0) Int>_R -> N:Sum[0] <Int>_R
 
 {--------------------------------------------------------------------
     Primitive translation
@@ -419,9 +508,12 @@ mkReifyEnv = do
        where
          err = "reify installation: couldn't find "
                ++ str ++ " in " ++ moduleNameString modu
-      lookupExp   = lookupRdr (mkModuleName "ReificationRules.FOS")
-      findExpId   = lookupExp lookupId
-      findTupleId = lookupRdr (mkModuleName "Data.Tuple") lookupId
+      findId modu = lookupRdr (mkModuleName modu) lookupId
+      findExpId   = findId "ReificationRules.FOS"
+      findTupleId = findId "Data.Tuple"
+      findBaseId  = findId "GHC.Base"
+      findMiscId  = findId "ReificationRules.Misc"
+      findMonoId  = findId "ReificationRules.MonoPrims"
   varV     <- findExpId "varP"
   appV     <- findExpId "appP"
   lamV     <- findExpId "lamP"
@@ -438,8 +530,10 @@ mkReifyEnv = do
   reprPV   <- findExpId "reprP"
   fstV     <- findTupleId "fst"
   sndV     <- findTupleId "snd"
-  primMap  <- mapM (lookupRdr (mkModuleName "ReificationRules.MonoPrims") lookupId)
-                   stdMethMap
+  idV      <- findBaseId "id"
+  composeV <- findBaseId "."
+  prePostV <- findMiscId "-->"
+  primMap  <- mapM findMonoId stdMethMap
   let primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
                          <$> M.lookup (uqVarName v) primMap
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
@@ -599,3 +693,8 @@ stringExpr = Lit . mkMachString
 
 varNameExpr :: Id -> CoreExpr
 varNameExpr = stringExpr . uniqVarName
+
+pattern FunCo :: Role -> Coercion -> Coercion -> Coercion
+pattern FunCo r dom ran <- TyConAppCo r (isFunTyCon -> True) [dom,ran]
+ where
+   FunCo r dom ran = TyConAppCo r funTyCon [dom,ran]
