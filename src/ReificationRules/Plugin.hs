@@ -32,6 +32,7 @@ import Data.Maybe (fromMaybe,isJust)
 import Data.List (stripPrefix,isPrefixOf,isSuffixOf)
 import Data.Char (toLower)
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Text.Printf (printf)
 
 import System.IO.Unsafe (unsafePerformIO)
@@ -82,15 +83,13 @@ data ReifyEnv = ReifyEnv { varV       :: Id
                          , hasRepMeth :: HasRepMeth
                          , hasLit     :: HasLit
                          , expTy      :: Type
+                         , tracing    :: Bool
                          }
 
 -- TODO: Perhaps drop reifyV, since it's in the rule
 
 -- TODO: try replacing the identifiers with convenient functions that use them,
 -- thus shifting some complexity from reify to mkReifyEnv. 
-
-tracing :: Bool
-tracing = False -- True
 
 -- Whether to run Core Lint after every step
 lintSteps :: Bool
@@ -99,20 +98,6 @@ lintSteps = True -- False
 -- Keep this one False for simplifier synergy.
 recursively :: Bool
 recursively = False -- True
-
-dtrace :: String -> SDoc -> a -> a
-dtrace str doc | tracing   = pprTrace str doc
-               | otherwise = id
-
-pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
-pprTrans str a b = dtrace str (ppr a $$ text "-->" $$ ppr b) b
-
-traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
-traceUnop str f a = pprTrans str a (f a)
-
-traceRewrite :: (Outputable a, Outputable b, Functor f) =>
-                String -> Unop (a -> f b)
-traceRewrite str f a = pprTrans str a <$> f a
 
 type Rewrite a = a -> Maybe a
 type ReExpr = Rewrite CoreExpr
@@ -163,7 +148,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
      AboutTo("let")
      Let (NonRec v rhs) body
-        | not (reifiableExpr rhs) || isEvalVar rhs -> Let (NonRec v rhs) <$> tryReify body
+        | not (reifiableExpr rhs) || cheap rhs -> Let (NonRec v rhs) <$> tryReify body
        -- | isEvalVar rhs -> go (subst1 v rhs body)
        -- The not.isEvalVar test prevents a simplifier loop that keeps
        -- let-abstracting terms of the form evalP (varP x). The immediate go
@@ -232,6 +217,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
      -- reify (eval e) --> e.
      AboutTo("eval")
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
+     AboutTo("unfold")
+     (unfoldMaybe -> Just e') -> tryReify e'
      -- Other applications
      AboutTo("app")
      App u v | not (isTyCoArg v)
@@ -240,8 +227,6 @@ reify (ReifyEnv {..}) guts dflags inScope =
              , Just reV <- tryReify v
        ->
         Just (varApps appV [dom,ran] [reU,reV])
-     AboutTo("unfold")
-     (unfoldMaybe -> Just e') -> tryReify e'
      _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
@@ -280,6 +265,19 @@ reify (ReifyEnv {..}) guts dflags inScope =
    isEvalVar (Var ev `App` Type _ `App` (Var vv `App` Type _ `App` _)) =
      ev == evalV && vv == varV
    isEvalVar _ = False
+   -- Experimental
+   cheap :: CoreExpr -> Bool
+   -- cheap e | pprTrace "cheap?" (ppr e) False = undefined
+   cheap e | isTyCoDictArg e = True
+   cheap (Var v)             = not (isPrim v) &&
+                               maybe True cheap (inlineMaybe v)
+   cheap (Lit _)             = True
+   cheap (Lam _ body)        = cheap body
+   cheap (App u v)           = cheap u && cheap v  -- Watch out
+   cheap (Cast e _)          = cheap e
+   cheap _                   = False
+   -- I don't know how hard to try with inlining. Might work better to simplify
+   -- after reifying, since inlining and case-removal will have happened.
    simplE :: Bool -> Unop CoreExpr
 #if 1
    simplE inlining = -- traceUnop ("simplify " ++ show inlining) $
@@ -298,6 +296,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
 #endif
    -- Convert a coercion (being used in a cast) to an equivalent Core function to
    -- apply.
+   -- TODO: Consider handling casts one layer at a time (non-recursively),
+   -- leaving behind simpler casts.
    recast :: Coercion -> Maybe CoreExpr
    recast (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
    recast (FunCo _r domCo ranCo) =
@@ -322,10 +322,27 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- Unfold application head, if possible.
    unfoldMaybe :: ReExpr
    unfoldMaybe = -- traceRewrite "unfold" $
-                 onAppsFun (-- traceRewrite "unfold" $
-                            \ v -> guard (not (isPrim v)) >>
-                                   maybeUnfoldingTemplate (realIdUnfolding v))
+                 onAppsFun inlineMaybe
+   inlineMaybe :: Id -> Maybe CoreExpr
+   inlineMaybe v = guard (not (isPrim v)) >>
+                   maybeUnfoldingTemplate (realIdUnfolding v)
    -- See match_inline from PrelRules, as used with 'inline'.
+   inlineable :: Id -> Bool
+   inlineable = isJust . inlineMaybe
+
+   dtrace :: String -> SDoc -> a -> a
+   dtrace str doc | tracing   = pprTrace str doc
+                  | otherwise = id
+
+   pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
+   pprTrans str a b = dtrace str (ppr a $$ text "-->" $$ ppr b) b
+
+   traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
+   traceUnop str f a = pprTrans str a (f a)
+
+   traceRewrite :: (Outputable a, Outputable b, Functor f) =>
+                   String -> Unop (a -> f b)
+   traceRewrite str f a = pprTrans str a <$> f a
 
 -- TODO: Should I unfold (inline application head) earlier? Doing so might
 -- result in much simpler generated code by avoiding many beta-redexes. If I
@@ -524,6 +541,7 @@ mkReifyEnv = do
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
   let expTy = expTyFromReifyTy (varType reifyV)
+  let tracing = True                    -- TODO: get from plugin argument
   return (ReifyEnv { .. })
  where
    -- Used to extract Prim tycon argument
