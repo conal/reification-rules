@@ -151,6 +151,7 @@ reify env@(ReifyEnv {..}) guts dflags inScope =
      -- (\ x -> e) --> lamP "x" e[x/eval (var "x")]
      AboutTo("lambda")
      Lam x e | not (isTyVar x) ->
+       -- TODO: maybe use mkVarEvald
        do let x' = varApps varV [xty] [str]
           e' <- tryReify (subst1 x (varApps evalV [xty] [x']) e)
           return $ varApps lamV [xty, exprType e] [str, e']
@@ -159,19 +160,24 @@ reify env@(ReifyEnv {..}) guts dflags inScope =
          xty = varType x
          y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
      AboutTo("let")
-     Let (NonRec v rhs) body | reifiableExpr rhs ->
-#if 0
-       go (Lam v body `App` rhs)
+     Let (NonRec v rhs) body
+        | not (reifiableExpr rhs) -> Let (NonRec v rhs) <$> tryReify body
+        | isEvalVar rhs -> go (subst1 v rhs body)
+       -- The not.isEvalVar test prevents a simplifier loop that keeps
+       -- let-abstracting terms of the form evalP (varP x). The immediate go
+       -- delays GHC re-hoisting long enough to avoid an infinite loop. See
+       -- journal entry 2016-03-15.
+        | otherwise ->
+#if 1
+          go (Lam v body `App` rhs)
 #else
-       -- Alternatively use letP. Works but more complicated.
-       -- letP :: forall a b. Name# -> EP a -> EP b -> EP b
-       liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType body]
-                                 [name,rhs',body'])
-              (tryReify rhs)
-              (tryReify (subst1 v evald body))
-       | otherwise -> Let (NonRec v rhs) <$> tryReify body
-      where
-        (name,evald) = mkVarEvald v
+          -- Alternatively use letP. Works but more complicated.
+          -- letP :: forall a b. Name# -> EP a -> EP b -> EP b
+          let (name,evald) = mkVarEvald v in
+            liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType body]
+                                      [name,rhs',body'])
+                   (tryReify rhs)
+                   (tryReify (subst1 v evald body))
 #endif
      AboutTo("case-of-case")
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
@@ -264,12 +270,17 @@ reify env@(ReifyEnv {..}) guts dflags inScope =
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
-   -- Simplify to fixed point
+   -- Has the form evalP (varP x)
+   isEvalVar :: CoreExpr -> Bool
+   isEvalVar (Var ev `App` Type _ `App` (Var vv `App` Type _ `App` _)) =
+     ev == evalV && vv == varV
+   isEvalVar _ = False
    simplE :: Bool -> Unop CoreExpr
 #if 1
    simplE inlining = -- traceUnop ("simplify " ++ show inlining) $
      simplifyE dflags inlining
 #else
+   -- Simplify to fixed point
    simplE inlining = sim 0
     where
       sim :: Int -> Unop CoreExpr
@@ -285,7 +296,6 @@ reify env@(ReifyEnv {..}) guts dflags inScope =
 -- TODO: Should I unfold (inline application head) earlier? Doing so might
 -- result in much simpler generated code by avoiding many beta-redexes. If I
 -- do, take care not to inline "primitives". I think it'd be fairly easy.
-
 
 onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
 onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
