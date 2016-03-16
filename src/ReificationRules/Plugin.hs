@@ -67,6 +67,7 @@ data ReifyEnv = ReifyEnv { varV       :: Id
                          , reifyV     :: Id
                          , evalV      :: Id
                          , primFun    :: PrimFun
+                         , isPrim     :: Id -> Bool
                          , abstV      :: Id
                          , reprV      :: Id
                          , abst'V     :: Id
@@ -88,15 +89,16 @@ data ReifyEnv = ReifyEnv { varV       :: Id
 -- TODO: try replacing the identifiers with convenient functions that use them,
 -- thus shifting some complexity from reify to mkReifyEnv. 
 
-recursively :: Bool
-recursively = False -- True
-
 tracing :: Bool
 tracing = False -- True
 
 -- Whether to run Core Lint after every step
 lintSteps :: Bool
 lintSteps = True -- False
+
+-- Keep this one False for simplifier synergy.
+recursively :: Bool
+recursively = False -- True
 
 dtrace :: String -> SDoc -> a -> a
 dtrace str doc | tracing   = pprTrace str doc
@@ -179,6 +181,10 @@ reify (ReifyEnv {..}) guts dflags inScope =
                    (tryReify rhs)
                    (tryReify (subst1 v evald body))
 #endif
+     AboutTo("case-of-cast")
+     Case (Cast e co) wild ty alts ->
+       do scrut' <- (`App` e) <$> recast co
+          tryReify (Case scrut' wild ty alts)
      AboutTo("case-of-case")
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
      AboutTo("pair scrutinee")
@@ -205,7 +211,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
      AboutTo("unfold scrutinee")
      Case scrut v altsTy alts
-       | Just scrut' <- inlineMaybe scrut
+       | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
      AboutTo("cast")
      Cast e co -> tryReify =<< (`App` e) <$> recast co
@@ -234,9 +240,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
              , Just reV <- tryReify v
        ->
         Just (varApps appV [dom,ran] [reU,reV])
-     -- Last resort: try unfolding
-     AboutTo("inline")
-     (inlineMaybe -> Just e') -> tryReify e'
+     AboutTo("unfold")
+     (unfoldMaybe -> Just e') -> tryReify e'
      _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
@@ -294,11 +299,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- Convert a coercion (being used in a cast) to an equivalent Core function to
    -- apply.
    recast :: Coercion -> Maybe CoreExpr
-   recast (Refl _r ty) = Just (inlined (varApps idV [ty] []))
+   recast (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
    recast (FunCo _r domCo ranCo) =
      liftA2 mkPrePost (recast (mkSymCo domCo)) (recast ranCo) -- co/contravariant
     where
-      mkPrePost f g = inlined $ varApps prePostV [a,b,a',b'] [f,g]
+      mkPrePost f g = unfolded $ varApps prePostV [a,b,a',b'] [f,g]
        where
          -- (-->) :: forall a b a' b'.
          --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
@@ -309,11 +314,18 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- Panic for now, to reduce output.
    -- Maybe stick with the panic, and drop the Maybe.
    recast co = pprPanic "recast: unhandled coercion" (ppr co)
---    recast co = dtrace "recast: unhandled coercion" (ppr co) $
---            Nothing
+   -- recast co = dtrace "recast: unhandled coercion" (ppr co) Nothing
    recastRep v get co =
      ($ v) <$> hasRepMeth dflags guts inScope (get (coercionKind co))
-
+   unfolded :: Unop CoreExpr
+   unfolded e = fromMaybe e (unfoldMaybe e)               
+   -- Unfold application head, if possible.
+   unfoldMaybe :: ReExpr
+   unfoldMaybe = -- traceRewrite "unfold" $
+                 onAppsFun (-- traceRewrite "unfold" $
+                            \ v -> guard (not (isPrim v)) >>
+                                   maybeUnfoldingTemplate (realIdUnfolding v))
+   -- See match_inline from PrelRules, as used with 'inline'.
 
 -- TODO: Should I unfold (inline application head) earlier? Doing so might
 -- result in much simpler generated code by avoiding many beta-redexes. If I
@@ -322,17 +334,6 @@ reify (ReifyEnv {..}) guts dflags inScope =
 onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
 onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
 onAppsFun _ _ = Nothing
-
-inlined :: Unop CoreExpr
-inlined e = fromMaybe e (inlineMaybe e)               
-
--- Inline application head, if possible.
-inlineMaybe :: ReExpr
-inlineMaybe = -- traceRewrite "unfold" $
-              onAppsFun (-- traceRewrite "inline" $
-                         maybeUnfoldingTemplate . realIdUnfolding)
-
--- See match_inline from PrelRules, as used with 'inline'.
 
 hasUnfolding :: Id -> Bool
 hasUnfolding (uqVarName -> "inline") = False
@@ -514,8 +515,10 @@ mkReifyEnv = do
   composeV <- findBaseId "."
   prePostV <- findMiscId "-->"
   primMap  <- mapM findMonoId stdMethMap
-  let primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
-                         <$> M.lookup (uqVarName v) primMap
+  let lookupPrim v = M.lookup (uqVarName v) primMap
+      primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
+                         <$> lookupPrim v
+      isPrim = isJust . lookupPrim
   hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
   toLitV <- findExpId "litE"
   let hasLitTc = tcFromToLitETy (varType toLitV)
