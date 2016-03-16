@@ -192,7 +192,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut)
        , Just meth <- hrMeth scrut
-       -> tryReify $
+       -> tryReify $ -- go  -- Less chatty with go
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
      AboutTo("unfold scrutinee")
      Case scrut v altsTy alts
@@ -219,6 +219,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      AboutTo("unfold")
      (unfoldMaybe -> Just e') -> tryReify e'
+     -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
      AboutTo("app")
      App u v | not (isTyCoArg v)
