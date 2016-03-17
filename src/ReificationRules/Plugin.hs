@@ -29,7 +29,7 @@ import Control.Arrow (first,second)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard,(<=<))
 import Data.Maybe (fromMaybe,isJust)
-import Data.List (stripPrefix,isPrefixOf,isSuffixOf)
+import Data.List (stripPrefix,isPrefixOf,isSuffixOf,elemIndex)
 import Data.Char (toLower)
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -38,11 +38,13 @@ import Text.Printf (printf)
 import System.IO.Unsafe (unsafePerformIO)
 
 import GhcPlugins
+import Class (classAllSelIds)
 import CoreArity (etaExpand)
 import CoreLint (lintExpr)
 import CoreSeq (seqExpr)
 import DynamicLoading
 import Kind (isLiftedTypeKind)
+import MkId (mkDictSelRhs)
 import Pair (Pair(..))
 import Type (coreView,mkAppTy)
 import TcType (isIntegerTy)
@@ -82,7 +84,6 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , prePostV   :: Id
                          , hasRepMeth :: HasRepMeth
                          , hasLit     :: HasLit
---                          , expTy      :: Type
                          , tracing    :: Bool
                          }
 
@@ -102,32 +103,33 @@ recursively = False -- True
 type Rewrite a = a -> Maybe a
 type ReExpr = Rewrite CoreExpr
 
--- #define AboutTo(str) e | dtrace ("About to " ++ (str)) (e `seq` empty) False -> undefined
+-- #define Trying(str) e | dtrace ("Trying " ++ (str)) (e `seq` empty) False -> undefined
 
-#define AboutTo(str)
+#define Trying(str)
 
 -- Use of e in a dtrace argument prevents the dtrace call from getting hoisted.
 
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
 reify (ReifyEnv {..}) guts dflags inScope =
+  -- pprTrace "reify rule" empty $
   traceRewrite "reify" $
   lintReExpr $
   go
  where
    go :: ReExpr
    go = \ case 
-     e | dtrace "reify go:" (ppr e) False -> undefined
-     AboutTo("lambda")
+     -- e | dtrace "reify go:" (ppr e) False -> undefined
+     Trying("lambda")
      Lam x e | not (isTyVar x) ->
        -- lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
        -- (\ x -> e) --> lamP "x" (\ x' -> e[x/eval x'])
-       do e' <- dtrace "lambda" (ppr (subst1 x evalY e) <+> dcolon <+> ppr (exprType (subst1 x evalY e))) $
-                dtrace "lambda" (ppr (reifiableType (exprType (subst1 x evalY e))))
+       do e' <- -- dtrace "lambda" (ppr (subst1 x evalY e) <+> dcolon <+> ppr (exprType (subst1 x evalY e))) $
+                -- dtrace "lambda" (ppr (reifiableType (exprType (subst1 x evalY e))))
                 tryReify (subst1 x evalY e)
           return $ varApps lamV [varType x, exprType e] [strY, Lam y e']
        where
          (y,strY,evalY) = mkVarEvald x
-     AboutTo("let")
+     Trying("let")
      Let (NonRec x rhs) body
         | not (reifiableExpr rhs) || cheap rhs -> Let (NonRec x rhs) <$> tryReify body
        -- | isEvalVar rhs -> go (subst1 v rhs body)
@@ -147,13 +149,13 @@ reify (ReifyEnv {..}) guts dflags inScope =
                    (tryReify rhs)
                    (tryReify (subst1 x evalY body))
 #endif
-     AboutTo("case-of-cast")
+     Trying("case-of-cast")
      Case (Cast e co) wild ty alts ->
        do scrut' <- (`App` e) <$> recast co
           tryReify (Case scrut' wild ty alts)
-     AboutTo("case-of-case")
+     Trying("case-of-case")
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
-     AboutTo("pair scrutinee")
+     Trying("pair scrutinee")
      e@(Case scrut wild rhsTy [(DataAlt dc, [a,b], rhs)])
          | isBoxedTupleTyCon (dataConTyCon dc)
          , reifiableExpr rhs ->
@@ -169,21 +171,25 @@ reify (ReifyEnv {..}) guts dflags inScope =
       where
         (a',strA,evalA) = mkVarEvald a
         (b',strB,evalB) = mkVarEvald b
-     AboutTo("abstReprCase")
+     Trying("abstReprCase")
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut)
        , Just meth <- hrMeth scrut
        -> tryReify $ -- go  -- Less chatty with go
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
-     AboutTo("unfold scrutinee")
+     Trying("unfold scrutinee")
      Case scrut v altsTy alts
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
-     AboutTo("cast")
-     Cast e co -> tryReify =<< (`App` e) <$> recast co
-     AboutTo("repMeth <+ lit")
-     (repMeth <+ lit -> Just e) -> Just e
-     AboutTo("abstReprCon")
+--        | dtrace "unfold scrutinee failed" (ppr scrut) False -> undefined
+     Trying("cast")
+     -- Cast e co -> tryReify =<< (`App` e) <$> recast co
+     Cast e (recast -> Just f) -> tryReify (App f e)
+     Trying("repMeth")
+     (repMeth -> Just e) -> Just e
+     Trying("literal")
+     (literal -> Just e) -> Just e
+     Trying("abstReprCon")
      -- Constructor applied to type-only arguments.
      e@(collectTyCoDictArgs -> (Var (isDataConId_maybe -> Just dc),_))
        | let (binds,body) = collectBinders (etaExpand (dataConRepArity dc) e)
@@ -191,18 +197,22 @@ reify (ReifyEnv {..}) guts dflags inScope =
        -> do tryReify $
                mkLams binds $
                  meth abstV `App` (simplE True (meth repr'V `App` body))
-     AboutTo("primitive")
+     Trying("primitive")
      -- Primitive functions
      e@(collectTyArgs -> (Var v, tys))
        | j@(Just _) <- primFun (exprType e) v tys -> j
      -- reify (eval e) --> e.
-     AboutTo("eval")
+     Trying("eval")
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
-     AboutTo("unfold")
+     Trying("unfold")
      (unfoldMaybe -> Just e') -> tryReify e'
      -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
-     AboutTo("app")
+     Trying("case-apps")
+     -- Push arguments into case alternatives. TODO: take care when multi-alt
+     -- and runtime args.
+     (collectArgs -> (c@(Case {}), args)) -> tryReify (onCaseRhs (`mkApps` args) c)
+     Trying("app")
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u)
              , Just reU <- tryReify u
@@ -230,8 +240,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
                             Nothing
    hrMeth :: CoreExpr -> Maybe (Id -> CoreExpr)
    hrMeth = hasRepMeth dflags guts inScope . exprType
-   lit :: ReExpr
-   lit = hasLit dflags guts inScope
+   literal :: ReExpr
+   literal = hasLit dflags guts inScope
    repMeth :: ReExpr
    repMeth (collectArgs -> (Var v, args@(length -> 4))) =
      do nm <- stripPrefix "ReificationRules.HOS." (fqVarName v)
@@ -305,10 +315,16 @@ reify (ReifyEnv {..}) guts dflags inScope =
    unfoldMaybe :: ReExpr
    unfoldMaybe = -- traceRewrite "unfold" $
                  onAppsFun inlineMaybe
+   onInlineFail :: Id -> Maybe CoreExpr
+   onInlineFail v =
+     pprTrace "onInlineFail idDetails" (ppr v <+> colon <+> ppr (idDetails v))
+     Nothing
    inlineMaybe :: Id -> Maybe CoreExpr
    inlineMaybe v = guard (not (isPrim v)) >>
-                   maybeUnfoldingTemplate (realIdUnfolding v)
+                   (inlineId <+ -- onInlineFail <+ traceRewrite "inlineClassOp"
+                                inlineClassOp) v
    -- See match_inline from PrelRules, as used with 'inline'.
+   -- Temporary. Show info about failed inlinings
    inlineable :: Id -> Bool
    inlineable = isJust . inlineMaybe
    -- Tracing
@@ -343,6 +359,18 @@ reify (ReifyEnv {..}) guts dflags inScope =
 -- result in much simpler generated code by avoiding many beta-redexes. If I
 -- do, take care not to inline "primitives". I think it'd be fairly easy.
 
+-- Try to inline an identifier.
+-- TODO: Also class ops
+inlineId :: Id -> Maybe CoreExpr
+inlineId v = maybeUnfoldingTemplate (realIdUnfolding v)
+
+-- Adapted from Andrew Farmer's getUnfoldingsT in HERMIT.Dictionary.Inline:
+inlineClassOp :: Id -> Maybe CoreExpr
+inlineClassOp v =
+  case idDetails v of
+    ClassOpId cls -> mkDictSelRhs cls <$> elemIndex v (classAllSelIds cls)
+    _             -> Nothing
+
 onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
 onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
 onAppsFun _ _ = Nothing
@@ -370,7 +398,7 @@ alreadyAbstReprd (collectArgs -> (h,_)) =
     _       -> False
 
 infixl 3 <+
-(<+) :: Binop (Rewrite a)
+(<+) :: Binop (a -> Maybe b)
 (<+) = liftA2 (<|>)
 
 varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
@@ -548,7 +576,6 @@ mkReifyEnv opts = do
   toLitV <- findExpId "litE"
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
---   let expTy = expTyFromReifyTy (varType reifyV)
   let tracing = "trace" `elem` opts
   return (ReifyEnv { .. })
  where
@@ -563,12 +590,6 @@ mkReifyEnv opts = do
 -- The next few functions extract types and tycons from the types of looked-up
 -- identifiers. I'd rather learn how to look up the types and tycons directly,
 -- as I do with (value) identifiers.
-
--- expTyFromReifyTy :: Type -> Type
--- expTyFromReifyTy reifyTy = expTy
---  where
---    Just (_a,expA) = splitFunTy_maybe (dropForAlls reifyTy)
---    Just (expTy,_) = splitAppTy_maybe expA
 
 -- Extract HasRep and Rep from the type of abst
 repTcsFromAbstTy :: Type -> (TyCon,TyCon)
@@ -707,3 +728,10 @@ pattern FunCo :: Role -> Coercion -> Coercion -> Coercion
 pattern FunCo r dom ran <- TyConAppCo r (isFunTyCon -> True) [dom,ran]
  where
    FunCo r dom ran = TyConAppCo r funTyCon [dom,ran]
+
+onCaseRhs :: Unop (Unop CoreExpr)
+onCaseRhs f (Case scrut v altsTy alts) = Case scrut v altsTy (onAltRhs f <$> alts)
+onCaseRhs _ e = pprPanic "onCaseRhs. Not a case: " (ppr e)
+
+onAltRhs :: Unop CoreExpr -> Unop CoreAlt
+onAltRhs f (con,bs,rhs) = (con,bs,f rhs)
