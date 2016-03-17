@@ -28,8 +28,6 @@ module ReificationRules.FOS
   , abst,repr,abst',repr', abstP,reprP
   ) where
 
--- TODO: explicit exports
-
 import GHC.Types (type (~~))
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
