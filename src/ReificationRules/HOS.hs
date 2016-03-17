@@ -151,8 +151,8 @@ reify _ = error "reify: not implemented"
 -- reify f = renameVars (first (reifyP f))
 {-# NOINLINE reify #-}
 
--- {-# RULES "reify & rename" forall f. reify f = renameVars (fst (reifyP f)) #-}
-{-# RULES "reify & drop name-map (temporary)" forall f. reify f = fst (reifyP f) #-}
+{-# RULES "reify & rename" forall f. reify f = renameVars (fst (reifyP f)) #-}
+-- {-# RULES "reify & drop name-map (temporary)" forall f. reify f = fst (reifyP f) #-}
 
 evalP :: forall a. EP a -> a
 evalP = evalE'
