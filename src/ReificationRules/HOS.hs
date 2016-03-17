@@ -5,7 +5,7 @@
 -- Might be worthwhile to turn back on and inspect warnings occasionally.
 {-# OPTIONS_GHC -fno-warn-inline-rule-shadowing #-}
 
--- #define Testing
+#define Testing
 
 -- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
 #ifdef Testing
@@ -27,12 +27,9 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.HOS
-  ( EP,toE,appP,lamP,reifyP,evalP,constP
-  , abst,repr,abst',repr', abstP,reprP -- , abstReprScrut 
-  , litE
+  ( EP,toE,constP,appP,lamP,letP,letPairP,evalP,reifyP,reify, litE
+  , abst,repr,abst',repr', abstP,reprP
   ) where
-
--- TODO: explicit exports
 
 import Data.Map
 
@@ -41,7 +38,7 @@ import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
 #ifdef Testing
-import Circat.Misc (Unop,Binop,Ternop)
+import Circat.Misc (Unop,Binop,Ternop,(:*))
 #endif
 import qualified Circat.Rep as Rep
 import Circat.Rep (HasRep,Rep)
@@ -74,15 +71,36 @@ toE = fst
 app :: E' p (a -> b) -> E' p a -> E' p b
 (f,mf) `app` (x,mx) = (f :^ x, mf `lub` mx)
 
-lam :: Name -> (E' p a -> E' p b) -> E' p (a -> b)
-lam nm f = (Lam (VarPat (V nm')) body, mf)
+-- Establish a new name based on nm, augmenting name map as needed
+bump :: Unop (Name, NameMap)
+bump (nm,m) = (maybe nm ((nm ++) . show) mbN,m')
  where
-   (body,mb) = f (Var (V nm'),bot)
-   (mbN,mf)  = insertLookupWithKey (const (+)) nm 1 mb
-   nm'       = maybe nm ((nm ++) . show) mbN
+   (mbN,m') = insertLookupWithKey (const (+)) nm 1 m
 
 -- insertLookupWithKey ::
 --   Ord k => (k -> a -> a -> a) -> k -> a -> Map k a -> (Maybe a, Map k a)
+
+lam :: Name -> (E' p a -> E' p b) -> E' p (a -> b)
+lam nma f = (Lam (VarPat (V nma')) body, mb)
+ where
+   (body,ma) = f (Var (V nma'),bot)
+   (nma',mb) = bump (nma,ma)
+
+lamPair :: Name -> Name -> (E' p a -> E' p b -> E' p c) -> E' p (a :* b -> c)
+lamPair nma nmb f = (Lam (VarPat (V nma') :$ VarPat (V nmb')) body, mc)
+ where
+   (body,ma) = f (Var (V nma'),bot) (Var (V nmb'),bot)
+   (nma',mb) = bump (nma,ma)
+   (nmb',mc) = bump (nmb,mb)
+
+-- TODO: Maybe switch to bump :: Name -> State NameMap Name.
+-- Especially convenient with lamPair. Maybe not, considering the circularity.
+
+letE' :: Name -> E' p a -> (E' p a -> E' p b) -> E' p b
+letE' x a f = lam x f `app` a
+
+letPair' :: Name -> Name -> E' p (a :* b) -> (E' p a -> E' p b -> E' p c) -> E' p c
+letPair' x y ab f = lamPair x y f `app` ab
 
 constE' :: p a -> E' p a
 constE' p = (ConstE p, bot)
@@ -102,19 +120,39 @@ evalE' (e,_) = evalE e
 
 type EP a = E' Prim a
 
+type Name# = Addr#
+
 appP :: forall a b. EP (a -> b) -> EP a -> EP b
 appP = app
 {-# NOINLINE appP #-}
 
-## BAZINGA!
+-- ## BAZINGA!
 
-lamP :: forall a b. Addr# -> (EP a -> EP b) -> EP (a -> b)
-lamP addr = lam (unpackCString# addr)
+lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
+lamP x = lam (unpackCString# x)
 {-# NOINLINE lamP #-}
+
+letP :: forall a b. Name# -> EP a -> (EP a -> EP b) -> EP b
+letP x = letE' (unpackCString# x)
+
+letPairP :: forall a b c. Name# -> Name# -> EP (a :* b) -> (EP a -> EP b -> EP c) -> EP c
+letPairP x y = letPair' (unpackCString# x) (unpackCString# y)
+
+-- letP :: forall a b. Name# -> EP a -> EP b -> EP b
+-- letP x a b = Lam (varPat# x) b `appP` a
+-- {-# NOINLINE letP #-}
 
 reifyP :: forall a. a -> EP a
 reifyP = reifyE'
 {-# NOINLINE reifyP #-}
+
+reify :: a -> E Prim a
+reify _ = error "reify: not implemented"
+-- reify f = renameVars (first (reifyP f))
+{-# NOINLINE reify #-}
+
+-- {-# RULES "reify & rename" forall f. reify f = renameVars (fst (reifyP f)) #-}
+{-# RULES "reify & drop name-map (temporary)" forall f. reify f = fst (reifyP f) #-}
 
 evalP :: forall a. EP a -> a
 evalP = evalE'
@@ -168,53 +206,8 @@ reprP :: (HasRep a, Rep a ~~ a') => EP (a -> a')
 abstP = constP AbstP
 reprP = constP ReprP
 
-{--------------------------------------------------------------------
-    Rules
---------------------------------------------------------------------}
-
 litE :: HasLit a => a -> EP a
 litE = constP . LitP . toLit
-
-{-# RULES
-
--- "reifyP . evalP" forall e. reifyP (evalP e) = e
-
-"reify abst" reifyP abst = constP AbstP
-"reify repr" reifyP repr = constP ReprP
-
--- -- I don't know why these rules don't fire.
--- "reify abst" reifyP abst = abstP
--- "reify repr" reifyP repr = reprP
-
--- "reifyP not"  reifyP not  = constP NotP
--- "reifyP (&&)" reifyP (&&) = constP AndP
--- "reifyP (||)" reifyP (||) = constP OrP
-
--- "reifyP fst" reifyP fst = constP ExlP
--- "reifyP snd" reifyP snd = constP ExrP
--- "reifyP (,)" reifyP (,) = constP PairP
-
--- "reifyP True"  reifyP True  = litE True
--- "reifyP False" reifyP False = litE False
-
--- "reifyP I#" forall n. reifyP (I#     n) = litE (I# n)
--- "reifyP D#" forall n. reifyP (Doubli n) = litE (Doubli n)
-
--- -- TODO: Drop Doubli, and use Double:
--- 
--- "reifyP D#" forall n. reifyP (D# n) = litE (D# n)
-
--- "reifyP :#" reifyP (:#) = reifyP (\ x y -> abst (x,y))
-
--- "reifyP :#" forall x y. reifyP (x :# y) = reifyP (abst (x,y))
-
--- "reify RTree.L" reifyP R.L = abstP
--- "reify RTree.B" reifyP R.B = abstP
-
--- "reify LTree.L" reifyP L.L = abstP
--- "reify LTree.B" reifyP L.B = abstP
-
-  #-}
 
 #ifdef Testing
 
