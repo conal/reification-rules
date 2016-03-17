@@ -26,7 +26,6 @@
 module ReificationRules.FOS
   ( EP,varP,constP,appP,lamP,letP,letPairP,evalP,reifyP,reify, litE
   , abst,repr,abst',repr', abstP,reprP
-  , renameVars
   ) where
 
 -- TODO: explicit exports
@@ -91,7 +90,8 @@ reify _ = error "reify: not implemented"
 -- reify f = renameVars (reifyP f)
 {-# NOINLINE reify #-}
 
-{-# RULES "reify & rename" forall f. reify f = renameVars (reifyP f) #-}
+-- {-# RULES "reify & rename" forall f. reify f = renameVars (reifyP f) #-}
+{-# RULES "reify & no rename (temporarily)" forall f. reify f = reifyP f #-}
 
 evalP :: forall a. EP a -> a
 evalP = evalE
@@ -142,10 +142,6 @@ reprP :: (HasRep a, Rep a ~~ a') => EP (a -> a')
 
 abstP = constP AbstP
 reprP = constP ReprP
-
-{--------------------------------------------------------------------
-    Rules
---------------------------------------------------------------------}
 
 litE :: HasLit a => a -> EP a
 litE = constP . LitP . toLit
