@@ -60,9 +60,9 @@ import ReificationRules.Simplify (simplifyE)
 
 -- Information needed for reification. We construct this info in
 -- CoreM and use it in the reify rule, which must be pure.
-data ReifyEnv = ReifyEnv { varV       :: Id
-                         , appV       :: Id
+data ReifyEnv = ReifyEnv { appV       :: Id
                          , lamV       :: Id
+                      -- , varV       :: Id
                          , letV       :: Id
                          , letPairV   :: Id
                          , reifyV     :: Id
@@ -82,7 +82,7 @@ data ReifyEnv = ReifyEnv { varV       :: Id
                          , prePostV   :: Id
                          , hasRepMeth :: HasRepMeth
                          , hasLit     :: HasLit
-                         , expTy      :: Type
+--                          , expTy      :: Type
                          , tracing    :: Bool
                          }
 
@@ -102,23 +102,6 @@ recursively = False -- True
 type Rewrite a = a -> Maybe a
 type ReExpr = Rewrite CoreExpr
 
--- Apply a rewrite, lint the result, and check that the type is preserved.
-lintReExpr :: DynFlags -> Type -> Unop ReExpr
-lintReExpr dflags expTy rew before | lintSteps =
-  do after <- rew before
-     let oops str doc = pprPanic ("reify post-transfo check. " ++ str)
-                          (doc <> ppr before $$ text "-->" $$ ppr after)
-         beforeTy = mkAppTy expTy (exprType before)
-         afterTy  = exprType after
-     maybe (if beforeTy `eqType` afterTy then
-              return after
-            else
-              oops "type change" (ppr beforeTy <+> text "vs" <+> ppr afterTy
-                                  <+> text "in" $$ text ""))
-           (oops "Lint" empty)
-       (lintExpr dflags (varSetElems (exprFreeVars before)) before)
-lintReExpr _ _ rew before = rew before
-
 -- #define AboutTo(str) e | dtrace ("About to " ++ (str)) (e `seq` empty) False -> undefined
 
 #define AboutTo(str)
@@ -128,27 +111,25 @@ lintReExpr _ _ rew before = rew before
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
 reify (ReifyEnv {..}) guts dflags inScope =
   traceRewrite "reify" $
-  lintReExpr dflags expTy $
+  lintReExpr $
   go
  where
    go :: ReExpr
    go = \ case 
-     -- e | dtrace "reify go:" (ppr e) False -> undefined
-     -- lamP :: forall a b. Name# -> EP b -> EP (a -> b)
-     -- (\ x -> e) --> lamP "x" e[x/eval (var "x")]
+     e | dtrace "reify go:" (ppr e) False -> undefined
      AboutTo("lambda")
      Lam x e | not (isTyVar x) ->
-       -- TODO: maybe use mkVarEvald
-       do let x' = varApps varV [xty] [str]
-          e' <- tryReify (subst1 x (varApps evalV [xty] [x']) e)
-          return $ varApps lamV [xty, exprType e] [str, e']
+       -- lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
+       -- (\ x -> e) --> lamP "x" (\ x' -> e[x/eval x'])
+       do e' <- dtrace "lambda" (ppr (subst1 x evalY e) <+> dcolon <+> ppr (exprType (subst1 x evalY e))) $
+                dtrace "lambda" (ppr (reifiableType (exprType (subst1 x evalY e))))
+                tryReify (subst1 x evalY e)
+          return $ varApps lamV [varType x, exprType e] [strY, Lam y e']
        where
-         str = stringExpr (uniqVarName y)
-         xty = varType x
-         y   = zapIdOccInfo $ setVarType x (exprType (mkReify (Var x))) -- *
+         (y,strY,evalY) = mkVarEvald x
      AboutTo("let")
-     Let (NonRec v rhs) body
-        | not (reifiableExpr rhs) || cheap rhs -> Let (NonRec v rhs) <$> tryReify body
+     Let (NonRec x rhs) body
+        | not (reifiableExpr rhs) || cheap rhs -> Let (NonRec x rhs) <$> tryReify body
        -- | isEvalVar rhs -> go (subst1 v rhs body)
        -- The not.isEvalVar test prevents a simplifier loop that keeps
        -- let-abstracting terms of the form evalP (varP x). The immediate go
@@ -156,15 +137,15 @@ reify (ReifyEnv {..}) guts dflags inScope =
        -- journal entry 2016-03-15.
         | otherwise ->
 #if 0
-          go (Lam v body `App` rhs)
+          go (Lam x body `App` rhs)
 #else
-          -- Alternatively use letP. Works as well but more complicated.
-          -- letP :: forall a b. Name# -> EP a -> EP b -> EP b
-          let (name,evald) = mkVarEvald v in
+          -- Alternatively, use letP. Works as well but more complicated.
+          -- letP :: forall a b. Name# -> EP a -> (EP a -> EP b) -> EP b
+          let (y,strY,evalY) = mkVarEvald x in
             liftA2 (\ rhs' body' -> varApps letV [exprType rhs, exprType body]
-                                      [name,rhs',body'])
+                                      [strY,rhs',Lam y body'])
                    (tryReify rhs)
-                   (tryReify (subst1 v evald body))
+                   (tryReify (subst1 x evalY body))
 #endif
      AboutTo("case-of-cast")
      Case (Cast e co) wild ty alts ->
@@ -180,14 +161,14 @@ reify (ReifyEnv {..}) guts dflags inScope =
           unless (isDeadBinder wild) $
             pprPanic "reify - case with live wild var (not yet handled)" (ppr e)
           -- TODO: handle live wild var.
-          -- letPairP :: forall a b c. Name# -> Name# -> EP (a :* b) -> EP c -> EP c
+          -- letPairP :: forall a b c. Name# -> Name# -> EP (a :* b) -> (EP a -> EP b -> EP c) -> EP c
           liftA2 (\ rhs' scrut' -> varApps letPairV [varType a, varType b, rhsTy]
-                                     [nameA,nameB,scrut',rhs'])
+                                     [strA,strB,scrut',mkLams [a',b'] rhs'])
                  (tryReify (subst [(a,evalA),(b,evalB)] rhs))
                  (tryReify scrut)
       where
-        (nameA,evalA) = mkVarEvald a
-        (nameB,evalB) = mkVarEvald b
+        (a',strA,evalA) = mkVarEvald a
+        (b',strB,evalB) = mkVarEvald b
      AboutTo("abstReprCase")
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut)
@@ -231,12 +212,13 @@ reify (ReifyEnv {..}) guts dflags inScope =
      _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
-   -- v --> ("v", eval (varP "v"))
-   mkVarEvald :: Id -> (CoreExpr,CoreExpr)
-   mkVarEvald v = (vstr, varApps evalV [vty] [varApps varV [vty] [vstr]])
+   -- v --> ("v'", eval v')
+   mkVarEvald :: Id -> (Id,CoreExpr,CoreExpr)
+   mkVarEvald x = (y,strY, varApps evalV [xty] [Var y])
     where
-      vty  = varType     v
-      vstr = varNameExpr v
+      xty  = varType     x
+      y    = zapIdOccInfo (setVarType x (exprType (mkReify (Var x))))
+      strY = varNameExpr y
    -- Helpers
    mkReify :: Unop CoreExpr
    mkReify e = varApps reifyV [exprType e] [e]
@@ -252,7 +234,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    lit = hasLit dflags guts inScope
    repMeth :: ReExpr
    repMeth (collectArgs -> (Var v, args@(length -> 4))) =
-     do nm <- stripPrefix "ReificationRules.FOS." (fqVarName v)
+     do nm <- stripPrefix "ReificationRules.HOS." (fqVarName v)
         case nm of
           "abst" -> wrap abstPV
           "repr" -> wrap reprPV
@@ -261,10 +243,9 @@ reify (ReifyEnv {..}) guts dflags inScope =
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
-   -- Has the form evalP (varP x)
+   -- Has the form evalP x
    isEvalVar :: CoreExpr -> Bool
-   isEvalVar (Var ev `App` Type _ `App` (Var vv `App` Type _ `App` _)) =
-     ev == evalV && vv == varV
+   isEvalVar (Var ev `App` Type _ `App` (Var _)) = ev == evalV
    isEvalVar _ = False
    -- Experimental
    cheap :: CoreExpr -> Bool
@@ -341,6 +322,22 @@ reify (ReifyEnv {..}) guts dflags inScope =
    traceRewrite :: (Outputable a, Outputable b, Functor f) =>
                    String -> Unop (a -> f b)
    traceRewrite str f a = pprTrans str a <$> f a
+   -- Apply a rewrite, lint the result, and check that the type is preserved.
+   lintReExpr :: Unop ReExpr
+   lintReExpr rew before | lintSteps =
+     do after <- rew before
+        let oops str doc = pprPanic ("reify post-transfo check. " ++ str)
+                             (doc <> ppr before $$ text "-->" $$ ppr after)
+            beforeTy = exprType (mkReify before)
+            afterTy  = exprType after
+        maybe (if beforeTy `eqType` afterTy then
+                 return after
+               else
+                 oops "type change" (ppr beforeTy <+> text "vs" <+> ppr afterTy
+                                     <+> text "in" $$ text ""))
+              (oops "Lint" empty)
+          (lintExpr dflags (varSetElems (exprFreeVars before)) before)
+   lintReExpr rew before = rew before
 
 -- TODO: Should I unfold (inline application head) earlier? Doing so might
 -- result in much simpler generated code by avoiding many beta-redexes. If I
@@ -384,34 +381,46 @@ reifiableKind = isLiftedTypeKind
 
 -- Types we know how to handle
 reifiableType :: Type -> Bool
+-- reifiableType ty | pprTrace "reifiableType" (ppr ty) False = undefined
 reifiableType (coreView -> Just ty) = reifiableType ty
 reifiableType (splitFunTy_maybe -> Just (dom,ran)) = reifiableType dom && reifiableType ran
 reifiableType ty = not (or (($ ty) <$> bads))
  where
-   bads = [ isForAllTy
-          , not . reifiableKind . typeKind
-          , isPredTy
-          , badTyConApp
-          , badTyConArg
+   bads = [ try "isForAllTy" $ isForAllTy
+      --  , try "not . reifiableKind . typeKind" $ not . reifiableKind . typeKind
+          , try "isPredTy" $ isPredTy
+          , try "badTyConArg" $ badTyConArg
+          , try "badTyConApp" $ badTyConApp
           ]
+   try :: String -> Unop (Type -> Bool)
+   try _str p x = -- pprTrace (_str ++ ":") (ppr y)
+                  y
+     where y = p x
+
+-- badTyConArg is problematic with the reifiableKind test. Consider Pow Pair,
+-- which has reifiable kind, but Pair doesn't. What do I really want?
 
 badTyConArg :: Type -> Bool
+-- badTyConArg ty | pprTrace "badTyConArg" (ppr ty) False = undefined
 badTyConArg (coreView -> Just ty)             = badTyConArg ty
-badTyConArg (tyConAppArgs_maybe -> Just args) = not (all reifiableType args)
+badTyConArg (tyConAppArgs_maybe -> Just args) = -- pprTrace "tyConAppArgs" (ppr args) $
+                                                not (all reifiableType args)
 badTyConArg _                                 = False
 
 badTyConApp :: Type -> Bool
--- badTyConApp ty | pprTrace "badTyConApp try" (ppr ty) False = undefined
+-- badTyConApp ty | pprTrace "badTyConApp" (ppr ty) False = undefined
 badTyConApp (coreView -> Just ty)            = badTyConApp ty
 badTyConApp (tyConAppTyCon_maybe -> Just tc) = badTyCon tc
 badTyConApp _                                = False
+-- TODO: rename
 
 badTyCon :: TyCon -> Bool
+-- badTyCon tc | pprTrace "badTyCon" (ppr tc) False = undefined
 badTyCon tc = qualifiedName (tyConName tc) `elem`
   [ "GHC.Integer.Type"
   , "GHC.Types.[]"
   , "GHC.Types.IO"
-  , "ReificationRules.Exp.E"
+  , "ReificationRules.Exp.E"            -- TODO: Fix for HOS or okay?
   ]
 
 reifiableExpr :: CoreExpr -> Bool
@@ -506,12 +515,12 @@ mkReifyEnv opts = do
          err = "reify installation: couldn't find "
                ++ str ++ " in " ++ moduleNameString modu
       findId modu = lookupRdr (mkModuleName modu) lookupId
-      findExpId   = findId "ReificationRules.FOS"
+      findExpId   = findId "ReificationRules.HOS"
       findTupleId = findId "Data.Tuple"
       findBaseId  = findId "GHC.Base"
       findMiscId  = findId "ReificationRules.Misc"
       findMonoId  = findId "ReificationRules.MonoPrims"
-  varV     <- findExpId "varP"
+--   varV     <- findExpId "varP"
   appV     <- findExpId "appP"
   lamV     <- findExpId "lamP"
   letV     <- findExpId "letP"
@@ -539,7 +548,7 @@ mkReifyEnv opts = do
   toLitV <- findExpId "litE"
   let hasLitTc = tcFromToLitETy (varType toLitV)
   hasLit <- toLitM (hasLitTc,toLitV)
-  let expTy = expTyFromReifyTy (varType reifyV)
+--   let expTy = expTyFromReifyTy (varType reifyV)
   let tracing = "trace" `elem` opts
   return (ReifyEnv { .. })
  where
@@ -555,11 +564,11 @@ mkReifyEnv opts = do
 -- identifiers. I'd rather learn how to look up the types and tycons directly,
 -- as I do with (value) identifiers.
 
-expTyFromReifyTy :: Type -> Type
-expTyFromReifyTy reifyTy = expTy
- where
-   Just (_a,expA) = splitFunTy_maybe (dropForAlls reifyTy)
-   Just (expTy,_) = splitAppTy_maybe expA
+-- expTyFromReifyTy :: Type -> Type
+-- expTyFromReifyTy reifyTy = expTy
+--  where
+--    Just (_a,expA) = splitFunTy_maybe (dropForAlls reifyTy)
+--    Just (expTy,_) = splitAppTy_maybe expA
 
 -- Extract HasRep and Rep from the type of abst
 repTcsFromAbstTy :: Type -> (TyCon,TyCon)

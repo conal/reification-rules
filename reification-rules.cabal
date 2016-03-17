@@ -39,7 +39,7 @@ Library
                     ReificationRules.ShowUtils
                     ReificationRules.Prim
                     ReificationRules.Exp
-                    ReificationRules.FOS
+                    ReificationRules.HOS
                     ReificationRules.BuildDictionary
                     ReificationRules.Simplify
                     ReificationRules.Plugin

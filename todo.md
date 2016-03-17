@@ -15,3 +15,6 @@ The code contains several "`TODO`" comments, some of which are also listed below
 *   Now that I have *non-recursive* reification working well, consider converting some aspects back to separate, syntax-based rules (with the `RULES` pragma).
 *   In `Plugin`, learn how to look up types and tycons directly, as I do with (value) identifiers.
     Then remove the code that extract types and tycons from the types of looked-up identifiers (`expTyFromReifyTy` etc).
+*   Simplify *after* reifying.
+    Since inlining and case-removal will have happened, I think results will improve.
+    If so, do less during reification (including some `let`-avoidance).

@@ -24,25 +24,32 @@
 import Data.Foldable
 
 import Data.Monoid
+import Data.Tuple (swap)
 
-import ReificationRules.Misc (Unop,Binop,BinRel)
-import ReificationRules.FOS (EP,repr,abst,reify)
+import ReificationRules.Misc (Unop,Binop,BinRel,transpose)
+import ReificationRules.HOS (EP,repr,abst,reify)
 import ReificationRules.Run (go,Okay)
 
 import Circat.Doubli
 
 -- TEMP
-import TypeUnary.TyNat
-import Circat.Pair
-import Circat.RTree
+-- import TypeUnary.TyNat
+-- import Circat.Pair
+-- import Circat.RTree
+
+import ShapedTypes.Nat
+import ShapedTypes.Pair
+import qualified ShapedTypes.RPow as R
 
 import qualified Circat.Rep as R -- TEMP
 
+type RTree = R.Pow Pair
+
 main :: IO ()
 
--- main = print (reify t)
+main = print (reify t)
 
-main = go "foo" t
+-- main = go "foo" t
 
 {--------------------------------------------------------------------
     Working examples
@@ -78,6 +85,9 @@ main = go "foo" t
 -- t :: Int -> Bool -> (Bool,Int)
 -- t x y = (y,x)
 
+-- t :: (Int,Bool) -> (Bool,Int)
+-- t = swap
+
 -- t (p :: (Int,Bool)) = (snd p, fst p)
 
 -- t = (5,6) :: (Int,Int)
@@ -96,7 +106,9 @@ main = go "foo" t
 
 -- t = \ case u :# v -> u + v :: Int
 
--- t = \ case (B ts :: Tree N2 Int) -> ts
+-- t = \ case (R.B ts :: R.Pow Pair N2 Int) -> ts
+
+-- t = \ case (R.B ts :: RTree N2 Int) -> ts
 
 -- t = (1 +) :: Unop Int
 
@@ -110,11 +122,11 @@ main = go "foo" t
 
 -- t = fmap not :: Unop (Pair Bool)
 
--- t = fmap :: (Int -> Bool) -> Tree N0 Int -> Tree N0 Bool
+-- t = fmap :: (Int -> Bool) -> RTree N0 Int -> RTree N0 Bool
 
--- t = fmap :: (Int -> Bool) -> Tree N4 Int -> Tree N4 Bool
+-- t = fmap :: (Int -> Bool) -> RTree N4 Int -> RTree N4 Bool
 
--- t = fmap not :: Unop (Tree N4 Bool)
+-- t = fmap not :: Unop (RTree N4 Bool)
 
 -- t = Sum (3 :: Int)
 
@@ -126,14 +138,20 @@ main = go "foo" t
 
 -- t = mappend :: Binop (Sum Int)
 
-t = sum :: Tree N10 Int -> Int
+-- t = sum :: RTree N6 Int -> Int
+
+-- t = transpose :: Unop (Pair (Pair Bool))
 
 {--------------------------------------------------------------------
     In progress
 --------------------------------------------------------------------}
 
+-- Works, but blows up in time & code, probably due to fmap duplication.
+
+t = transpose :: Pair (RTree N3 Bool) -> RTree N3 (Pair Bool)
+
 {--------------------------------------------------------------------
-    Non-working examples
+    Broken
 --------------------------------------------------------------------}
 
 -- -- I don't yet handle Double. To do: switch from Doubli to Double in circat.

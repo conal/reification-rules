@@ -31,7 +31,9 @@ import Prelude
 
 import Control.Monad (when)
 
-import ReificationRules.FOS (EP,reify)
+import ReificationRules.Exp (E)
+import ReificationRules.Prim (Prim)
+import ReificationRules.HOS (reify)
 import ReificationRules.ToCCC (toCCC)
 
 import Circat.Category (Uncurriable)
@@ -91,12 +93,12 @@ showGraph :: Bool
 showGraph = False
 
 -- Run an example: reify, CCC, circuit.
-run :: Okay a => String -> [Attr] -> EP a -> IO ()
+run :: Okay a => String -> [Attr] -> E Prim a -> IO ()
 run name attrs e = do when showPretty $ putStrLn (name ++ " = " ++ show e)
                       outGV name attrs (unitize' (toCCC e))
 {-# NOINLINE run #-}
 
-runSep :: Okay a => String -> Double -> EP a -> IO ()
+runSep :: Okay a => String -> Double -> E Prim a -> IO ()
 runSep name s = run name [ranksep s]
 
 -- Diagram and Verilog

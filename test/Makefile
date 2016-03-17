@@ -22,7 +22,7 @@ GhcFlags += -fforce-recomp
 
 GhcFlags += -dsuppress-idinfo
 GhcFlags += -dsuppress-module-prefixes
-GhcFlags += -dsuppress-uniques
+# GhcFlags += -dsuppress-uniques
 
 # GhcFlags += -dsuppress-type-signatures
 # GhcFlags += -dsuppress-type-applications
@@ -40,14 +40,18 @@ GhcFlags += -dsuppress-uniques
 
 # GhcFlags += -fprint-explicit-kinds -fprint-equality-relations
 
+plugin=ReificationRules.Plugin
+
+# GhcFlags += -fplugin-opt=$(plugin):trace
+
 Tests: ../dist Tests.hs Makefile
-	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
+	$(ghc) -O -fplugin=$(plugin) $(GhcFlags) $@
 
 RuleTest: ../dist RuleTest.hs Makefile
-	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
+	$(ghc) -O -fplugin=$(plugin) $(GhcFlags) $@
 
 RT: ../dist RT.hs Makefile
-	$(ghc) -O -fplugin=ReificationRules.Plugin $(GhcFlags) $@
+	$(ghc) -O -fplugin=$(plugin) $(GhcFlags) $@
 
 shaped:
 	cd ../../shaped-types ; make
