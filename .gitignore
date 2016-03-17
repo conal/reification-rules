@@ -6,7 +6,6 @@ Stuff
 TAGS
 tags
 tarballs
-out/
 Unused/
 *.dump-*
 *.verbose-core2core
@@ -23,6 +22,6 @@ test/Examples
 *.hi
 *.o
 *.dump-simpl
-test/o*
+test/out
 test/Tests
 *.iface
