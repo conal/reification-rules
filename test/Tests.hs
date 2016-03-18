@@ -1,6 +1,6 @@
-{-# LANGUAGE LambdaCase, GADTs, TypeOperators #-}
+{-# LANGUAGE CPP, LambdaCase, GADTs, TypeOperators, DataKinds #-}
 
-{-# OPTIONS_GHC -Wall -fno-warn-missing-signatures #-}
+{-# OPTIONS_GHC -Wall -fno-warn-unticked-promoted-constructors -fno-warn-missing-signatures #-}
 
 {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
 {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
@@ -28,28 +28,31 @@ import Data.Tuple (swap)
 
 import ReificationRules.Misc (Unop,Binop,BinRel,transpose)
 import ReificationRules.HOS (EP,repr,abst,reify)
-import ReificationRules.Run (go,Okay)
+import ReificationRules.Run
 
 import Circat.Doubli
 
--- TEMP
--- import TypeUnary.TyNat
--- import Circat.Pair
--- import Circat.RTree
+-- Seems to be needed for Rep (Sum Int) --> Int
+-- TODO: Find a better way.
+import Circat.Rep ()
 
 import ShapedTypes.Nat
 import ShapedTypes.Pair
+import ShapedTypes.Vec
 import qualified ShapedTypes.RPow as R
-
-import qualified Circat.Rep as R -- TEMP
+import qualified ShapedTypes.LPow as L
+import ShapedTypes.Linear
 
 type RTree = R.Pow Pair
+type LTree = L.Pow Pair
 
 main :: IO ()
 
-main = print (reify t)
+-- main = print (reify t)
 
--- main = go "foo" t
+main = go "foo" t
+
+-- main = goSep "foo" 10 t
 
 {--------------------------------------------------------------------
     Working examples
@@ -142,13 +145,20 @@ main = print (reify t)
 
 -- t = transpose :: Unop (Pair (Pair Bool))
 
+-- t = transpose :: Pair (RTree N6 Bool) -> RTree N6 (Pair Bool)
+
+-- -- simpl-tick-factor bump
+-- t = transpose :: RTree N3 (RTree N4 Bool) -> RTree N4 (RTree N3 Bool)
+
+-- t = (<.>) :: Pair Int -> Pair Int -> Int
+
+-- t = dotG :: Pair (RTree N1 Int) -> Int
+
+t = (<.>) :: RTree N5 Int -> RTree N5 Int -> Int
+
 {--------------------------------------------------------------------
     In progress
 --------------------------------------------------------------------}
-
--- Works, but blows up in time & code, probably due to fmap duplication.
-
-t = transpose :: Pair (RTree N3 Bool) -> RTree N3 (Pair Bool)
 
 {--------------------------------------------------------------------
     Broken
@@ -159,3 +169,63 @@ t = transpose :: Pair (RTree N3 Bool) -> RTree N3 (Pair Bool)
 -- t = \ x y -> x > y + 3
 
 -- t = 3.0 :: Doubli
+
+{--------------------------------------------------------------------
+    Helpers
+--------------------------------------------------------------------}
+
+-- Generalized matrices
+
+type Matrix  m n a = Vec    n (Vec    m a)
+type MatrixT m n a = RTree  n (RTree  m a)
+-- type MatrixG p q a = Ragged q (Ragged p a)
+
+#if 0
+
+{--------------------------------------------------------------------
+    Permutations
+--------------------------------------------------------------------}
+
+invertR :: IsNat n => RTree n a -> LTree n a
+invertR = invertR' nat
+
+invertR' :: Nat n -> RTree n a -> LTree n a
+invertR' Zero     = \ (R.L a ) -> L.L a
+invertR' (Succ m) = \ (R.B ts) -> L.B (invertR' m (transpose ts))
+-- invertR' (Succ m) = \ (R.B ts) -> L.B (transpose (invertR' m <$> ts))
+
+#if 0
+R.unB    :: RTree (S n)   a  -> Pair (RTree n a)
+transpose :: Pair (RTree n a) -> RTree n (Pair a)
+invertR   :: RTree n (Pair a) -> LTree n (Pair a)
+L.B      :: LTree n (Pair a) -> LTree (S n)   a
+
+R.unB       :: RTree (S n)   a  -> Pair (RTree n a)
+fmap invertR :: Pair (RTree n a) -> Pair (LTree n a)
+transpose    :: Pair (LTree n a) -> LTree n (Pair a)
+L.B         :: LTree n (Pair a) -> LTree (S n)   a
+#endif
+
+-- We needed the IsNat n for Applicative on RTree n.
+-- The reverse transformation is easier, since we know Pair is Applicative.
+
+invertL :: LTree n a -> RTree n a
+invertL (L.L a ) = R.L a
+invertL (L.B ts) = R.B (transpose (invertL ts))
+-- invertL (L.B ts) = R.B (invertL <$> transpose ts)
+
+-- invertR' (Succ m) = \ (R.B ts) -> L.B (transpose (invertR' m <$> ts))
+
+#if 0
+L.unB    :: LTree (S n)   a  -> LTree n (Pair a)
+invertL   :: LTree n (Pair a) -> RTree n (Pair a)
+transpose :: RTree n (Pair a) -> Pair (RTree n a)
+R.B      :: Pair (RTree n a) -> RTree (S n)   a
+
+L.unB       :: LTree (S n)   a  -> LTree n (Pair a)
+transpose    :: LTree n (Pair a) -> Pair (LTree n a)
+fmap invertL :: Pair (LTree n a) -> Pair (RTree n a)
+R.B         :: Pair (RTree n a) -> RTree (S n)   a
+#endif
+
+#endif
