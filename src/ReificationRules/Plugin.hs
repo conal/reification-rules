@@ -174,26 +174,24 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("abstReprCase")
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut)
-       , Just meth <- hrMeth scrut
+       , Just meth <- hrMeth (exprType scrut)
        -> tryReify $ -- go  -- Less chatty with go
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
      Trying("unfold scrutinee")
      Case scrut v altsTy alts
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
---        | dtrace "unfold scrutinee failed" (ppr scrut) False -> undefined
      Trying("cast")
-     -- Cast e co -> tryReify =<< (`App` e) <$> recast co
      Cast e (recast -> Just f) -> tryReify (App f e)
      Trying("repMeth")
      (repMeth -> Just e) -> Just e
      Trying("literal")
      (literal -> Just e) -> Just e
      Trying("abstReprCon")
-     -- Constructor applied to type-only arguments.
+     -- Constructor applied to ty/co/dict arguments
      e@(collectTyCoDictArgs -> (Var (isDataConId_maybe -> Just dc),_))
        | let (binds,body) = collectBinders (etaExpand (dataConRepArity dc) e)
-       , Just meth <- hrMeth body
+       , Just meth <- hrMeth (exprType body)
        -> do tryReify $
                mkLams binds $
                  meth abstV `App` (simplE True (meth repr'V `App` body))
@@ -211,7 +209,9 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("case-apps")
      -- Push arguments into case alternatives. TODO: take care when multi-alt
      -- and runtime args.
-     (collectArgs -> (c@(Case {}), args)) -> tryReify (onCaseRhs (`mkApps` args) c)
+     e@(collectArgs -> (c@(Case {}), args@(_:_))) ->
+       tryReify (-- traceUnop "onCaseRhs" 
+                 (onCaseRhs (exprType e) (`mkApps` args)) c)
      Trying("app")
      App u v | not (isTyCoArg v)
              , Just (dom,ran) <- splitFunTy_maybe (exprType u)
@@ -238,8 +238,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
    tryReify e | reifiableExpr e = (guard recursively >> go e) <|> Just (mkReify e)
               | otherwise = -- pprTrace "Not reifiable:" (ppr e)
                             Nothing
-   hrMeth :: CoreExpr -> Maybe (Id -> CoreExpr)
-   hrMeth = hasRepMeth dflags guts inScope . exprType
+   hrMeth :: Type -> Maybe (Id -> CoreExpr)
+   hrMeth = hasRepMeth dflags guts inScope
    literal :: ReExpr
    literal = hasLit dflags guts inScope
    repMeth :: ReExpr
@@ -307,8 +307,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- Maybe stick with the panic, and drop the Maybe.
    recast co = pprPanic "recast: unhandled coercion" (ppr co)
    -- recast co = dtrace "recast: unhandled coercion" (ppr co) Nothing
-   recastRep v get co =
-     ($ v) <$> hasRepMeth dflags guts inScope (get (coercionKind co))
+   recastRep v get co = ($ v) <$> hrMeth (get (coercionKind co))
    unfolded :: Unop CoreExpr
    unfolded e = fromMaybe e (unfoldMaybe e)               
    -- Unfold application head, if possible.
@@ -628,14 +627,14 @@ hasRepMethodM (hasRepTc,repTc) =
      return $ \ dflags guts inScope ty ->
        let (mkEqBox -> eq,ty') =
              normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
-                           Nominal (mkTyConApp repTc [ty])
+                           Nominal (mkTyConApp repTc [ty])  -- Representational ??
            mfun :: CoreExpr -> Id -> CoreExpr
            mfun dict = -- pprTrace "hasRepMeth dict" (ppr dict) $
                        \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
                                  varApps meth [ty,ty'] [dict,eq]
                                  -- varApps meth [ty] [dict]
        in
-         -- pprTrace "hasRepMeth ty" (ppr ty) $
+         -- pprTrace "hasRepMeth ty" (ppr ty <+> text "-->" <+> ppr ty') $
          mfun <$> buildDictionary hscEnv dflags guts inScope
                     (mkTyConApp hasRepTc [ty])
 
@@ -729,9 +728,10 @@ pattern FunCo r dom ran <- TyConAppCo r (isFunTyCon -> True) [dom,ran]
  where
    FunCo r dom ran = TyConAppCo r funTyCon [dom,ran]
 
-onCaseRhs :: Unop (Unop CoreExpr)
-onCaseRhs f (Case scrut v altsTy alts) = Case scrut v altsTy (onAltRhs f <$> alts)
-onCaseRhs _ e = pprPanic "onCaseRhs. Not a case: " (ppr e)
+onCaseRhs :: Type -> Unop (Unop CoreExpr)
+onCaseRhs altsTy' f (Case scrut v _ alts) =
+  Case scrut v altsTy' (onAltRhs f <$> alts)
+onCaseRhs _ _ e = pprPanic "onCaseRhs. Not a case: " (ppr e)
 
 onAltRhs :: Unop CoreExpr -> Unop CoreAlt
 onAltRhs f (con,bs,rhs) = (con,bs,f rhs)
