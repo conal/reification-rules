@@ -1,4 +1,6 @@
-ghc = ~/bin/new-ghc/ghc
+ghc=~/bin/new-ghc/ghc
+
+plugin=ReificationRules.Plugin
 
 default: go
 
@@ -32,6 +34,7 @@ GhcFlags += -dsuppress-module-prefixes
 # GhcFlags += -ddump-rule-rewrites
 
 # GhcFlags += -ddump-rules
+# GhcFlags += -ddump-spec
 
 # GhcFlags += -ddump-rule-firings
 # GhcFlags += -ddump-simpl-trace
@@ -40,18 +43,27 @@ GhcFlags += -dsuppress-module-prefixes
 
 # GhcFlags += -fprint-explicit-kinds -fprint-equality-relations
 
-plugin=ReificationRules.Plugin
+GhcFlags += -fsimpl-tick-factor=200
 
+# GhcFlags += -funfolding-keeness-factor=0 -funfolding-use-threshold=0
+
+# Specialization blows up transpose code exponentially. Revisit when we reify partially.
+GhcFlags += -fno-specialise
+
+# # Trace reification
 # GhcFlags += -fplugin-opt=$(plugin):trace
 
+compile=$(ghc) -O -fplugin=$(plugin) $(GhcFlags)
+# compile=$(ghc) -O $(GhcFlags)
+
 Tests: ../dist Tests.hs Makefile
-	$(ghc) -O -fplugin=$(plugin) $(GhcFlags) $@
+	$(compile) $@
 
 RuleTest: ../dist RuleTest.hs Makefile
-	$(ghc) -O -fplugin=$(plugin) $(GhcFlags) $@
+	$(compile) $@
 
 RT: ../dist RT.hs Makefile
-	$(ghc) -O -fplugin=$(plugin) $(GhcFlags) $@
+	$(compile) $@
 
 shaped:
 	cd ../../shaped-types ; make
@@ -68,10 +80,10 @@ HI_DIR = ../dist/build/ReificationRules
 %.iface: $(HI_DIR)/%.hi
 	$(ghc) --show-iface $(HI_DIR)/$*.hi > $*.iface
 
-CIRCAT_HI_DIR = ../../circat/dist/build/Circat
+SHAPED_HI_DIR = ../../shaped-types/dist/build/ShapedTypes
 
-%.iface: $(CIRCAT_HI_DIR)/%.hi
-	$(ghc) --show-iface $(CIRCAT_HI_DIR)/$*.hi > $*.iface
+%.iface: $(SHAPED_HI_DIR)/%.hi
+	$(ghc) --show-iface $(SHAPED_HI_DIR)/$*.hi > $*.iface
 
 ifaces: HOS.iface Pair.iface
 
