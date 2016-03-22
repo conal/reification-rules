@@ -155,6 +155,15 @@ reify (ReifyEnv {..}) guts dflags inScope =
           tryReify (Case scrut' wild ty alts)
      Trying("case-of-case")
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
+     Trying("unit scrutinee")
+     e@(Case _scrut wild _rhsTy [(DataAlt dc, [], rhs)])
+         | isBoxedTupleTyCon (dataConTyCon dc)
+         , reifiableExpr rhs ->
+       do -- To start, require v to be unused. Later, extend.
+          unless (isDeadBinder wild) $
+            pprPanic "reify - case with live wild var (not yet handled)" (ppr e)
+          -- TODO: handle live wild var.
+          tryReify rhs
      Trying("pair scrutinee")
      e@(Case scrut wild rhsTy [(DataAlt dc, [a,b], rhs)])
          | isBoxedTupleTyCon (dataConTyCon dc)
@@ -303,6 +312,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
          Just (b,b') = splitFunTy_maybe (exprType g)
    recast co@(       AxiomInstCo {} ) = recastRep reprV pFst co
    recast co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
+   recast (SubCo co) = recast co
    -- Panic for now, to reduce output.
    -- Maybe stick with the panic, and drop the Maybe.
    recast co = pprPanic "recast: unhandled coercion" (ppr co)
