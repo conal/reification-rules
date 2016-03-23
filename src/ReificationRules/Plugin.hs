@@ -5,12 +5,13 @@
 {-# LANGUAGE PatternGuards     #-}
 {-# LANGUAGE PatternSynonyms   #-}
 {-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE ViewPatterns      #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
 -- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
-{-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
+-- {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
 
 ----------------------------------------------------------------------
 -- |
@@ -75,7 +76,6 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , composeV   :: Id
                          , prePostV   :: Id
                          , hasRepMeth :: HasRepMeth
-                         , hasRepDc   :: DataCon
                          , hasLit     :: HasLit
                          , tracing    :: Bool
                          }
@@ -340,7 +340,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    lintReExpr rew before | lintSteps =
      do after <- rew before
         let oops str doc = pprPanic ("reify post-transfo check. " ++ str)
-                             (doc <> ppr before $$ text "-->" $$ ppr after)
+                             (doc $$ ppr before $$ text "-->" $$ ppr after)
             beforeTy = exprType (mkReify before)
             afterTy  = exprType after
         maybe (if beforeTy `eqType` afterTy then
@@ -348,7 +348,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
                else
                  oops "type change" (ppr beforeTy <+> text "vs" <+> ppr afterTy
                                      <+> text "in" $$ text ""))
-              (oops "Lint" empty)
+              (oops "Lint")
           (lintExpr dflags (varSetElems (exprFreeVars before)) before)
    lintReExpr rew before = rew before
 
@@ -541,10 +541,8 @@ mkReifyEnv opts = do
                ++ str ++ " in " ++ moduleNameString modu
       lookupTh mkOcc mk modu = lookupRdr (mkModuleName modu) mkOcc mk
       findId = lookupTh mkVarOcc  lookupId
-      findDc = lookupTh mkDataOcc lookupDataCon
       findTc = lookupTh mkTcOcc   lookupTyCon
       findExpId   = findId "ReificationRules.HOS"
-      findRepDc   = findDc "Circat.Rep"
       findRepTc   = findTc "Circat.Rep"
       findBaseId  = findId "GHC.Base"
       findMiscId  = findId "ReificationRules.Misc"
@@ -572,13 +570,15 @@ mkReifyEnv opts = do
       isPrim = isJust . lookupPrim
   hasRepTc   <- findRepTc "HasRep"
   repTc      <- findRepTc "Rep"
-  hasRepMeth <- hasRepMethodM (hasRepTc,repTc)
+  hasRepMeth <- hasRepMethodM hasRepTc repTc idV
   toLitV     <- findExpId "litE"
   hasLitTc   <- findTc "ReificationRules.Prim" "HasLit"
-  hasLit     <- toLitM (hasLitTc,toLitV)
-  let [hasRepDc] = tyConDataCons hasRepTc
-      tracing    = "trace" `elem` opts
+  hasLit     <- toLitM hasLitTc toLitV
+  let tracing    = "trace" `elem` opts
   return (ReifyEnv { .. })
+
+      -- findDc = lookupTh mkDataOcc lookupDataCon
+      -- findPrimDc = findDc "ReificationRules.Prim"
 
 -- * I'm assuming that it's safe to reuse x's unique here, since x is
 -- eliminated. If not, use uniqAway x and then setVarType.
@@ -589,37 +589,64 @@ mkReifyEnv opts = do
 
 type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
-hasRepMethodM :: (TyCon,TyCon) -> CoreM HasRepMeth
-hasRepMethodM (hasRepTc,repTc) =
+hasRepMethodM :: TyCon -> TyCon -> Id -> CoreM HasRepMeth
+hasRepMethodM hasRepTc repTc idV =
   do hscEnv <- getHscEnv
      eps    <- liftIO (hscEPS hscEnv)
      return $ \ dflags guts inScope ty ->
-       -- newtypeHasRepMethodM ty <|>
-       let (mkEqBox -> eq,ty') =
-             normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
-                           Nominal (mkTyConApp repTc [ty])  -- Representational ??
-           mfun :: CoreExpr -> Id -> CoreExpr
-           mfun dict = -- pprTrace "hasRepMeth dict" (ppr dict) $
-                       \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
-                                 varApps meth [ty,ty'] [dict,eq]
-                                 -- varApps meth [ty] [dict]
-       in
-         -- pprTrace "hasRepMeth ty" (ppr ty <+> text "-->" <+> ppr ty') $
-         mfun <$> buildDictionary hscEnv dflags guts inScope
-                    (mkTyConApp hasRepTc [ty])
+       let newtypeRep :: Maybe (CoreExpr,(Coercion,Type))
 #if 0
- where
-   newtypeHasRepMethodM :: Type -> Maybe (Id -> CoreExpr)
-   newtypeHasRepMethodM ty =
-     do (tc,tyArgs)       <- splitTyConApp_maybe ty
-        (tvs,repTy,_coax) <- unwrapNewTyCon_maybe tc
-        let dict = varApps undefV [mkTyConApp hasRepTc [ty]] []
-            ty'  = substTy (zipTvSubst tvs tyArgs) repTy
-            co   = UnivCo (PluginProv "RepNewtype")
-                     Representational (mkTyConApp repTc [ty]) ty'
-        return $ \ meth ->
-          varApps meth [ty,ty'] [dict,mkEqBox co]
+           newtypeRep = Nothing
+#else
+           newtypeRep =
+             do (tc,tyArgs) <- splitTyConApp_maybe ty
+                (tvs,newtyRhs,_coax) <- unwrapNewTyCon_maybe tc
+                -- TODO: refactor to isolate the Maybe stuff.
+                let repTy = mkTyConApp repTc [ty]
+                    ty'   = substTy (zipTvSubst tvs tyArgs) newtyRhs
+                    [hasRepDc] = tyConDataCons hasRepTc
+                    mkIdFun t = varApps idV [t] []
+                    repNt = UnivCo (PluginProv "RepNT") Representational ty repTy
+                    reflTo t = mkFunCo Representational (mkRepReflCo t)
+                    mkMeth t co = mkCast (mkIdFun t) (reflTo t co)
+                    -- repNtIs = mkUnbranchedAxInstCo Nominal _coax tyArgs
+                    --             (mkNomReflCo <$> [ty])  -- tyArgs ?? repTy?
+                    repNtIs = UnivCo (PluginProv "RepNtIs") Nominal repTy ty'
+                    repr = mkMeth    ty          repNt
+                    abst = mkMeth repTy (mkSymCo repNt)
+                    dict = conApps hasRepDc [ty] [repr,abst]
+                return (dict,(repNtIs,ty'))
 #endif
+           findDict :: Maybe (CoreExpr,(Coercion,Type))
+           findDict =
+             (, normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
+                  Nominal (mkTyConApp repTc [ty]) )
+             <$> buildDictionary hscEnv dflags guts inScope
+                   (mkTyConApp hasRepTc [ty])
+           mkMethApp (dict,(co,ty')) =
+             -- pprTrace "hasRepMeth" (ppr (dict,co,ty')) $
+             \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
+                       varApps meth [ty,ty'] [dict,mkEqBox co]
+       in
+          mkMethApp <$> (newtypeRep <|> findDict)
+
+-- <Sum a>_R -> Data.Monoid.N:Sum[0]
+--               (Sub (Sym (Circat.Rep.D:R:RepSum[0] <a>_N)))
+-- :: (Sum a -> Sum a) ~R# (Sum a -> Rep (Sum a))
+
+
+-- mkUnbranchedAxInstCo :: Role -> CoAxiom Unbranched
+--                      -> [Type] -> [Coercion] -> Coercion
+
+-- Maybe useful:
+
+-- mkUnbranchedAxInstRHS :: CoAxiom Unbranched -> [Type] -> [Coercion] -> Type
+-- mkUnbranchedAxInstRHS ax = mkAxInstRHS ax 0
+
+
+-- mkReflCo :: Role -> Type -> Coercion
+-- mkFunCo :: Role -> Coercion -> Coercion -> Coercion
+
 
 -- unwrapNewTyCon_maybe :: TyCon -> Maybe ([TyVar], Type, CoAxiom Unbranched)
 -- splitTyConApp_maybe :: Type -> Maybe (TyCon, [Type])
@@ -635,8 +662,8 @@ hasRepMethodM (hasRepTc,repTc) =
 
 type HasLit = DynFlags -> ModGuts -> InScopeEnv -> ReExpr
 
-toLitM :: (TyCon,Id) -> CoreM HasLit
-toLitM (hasLitTc,toLitV) =
+toLitM :: TyCon -> Id -> CoreM HasLit
+toLitM hasLitTc toLitV =
   do hscEnv <- getHscEnv
      return $ \ dflags guts inScope e ->
        guard (isConApp e) >>            -- TODO: expand is-literal test
