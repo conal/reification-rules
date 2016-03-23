@@ -1,5 +1,6 @@
 {-# LANGUAGE CPP               #-}
 {-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE MultiWayIf        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards     #-}
 {-# LANGUAGE PatternSynonyms   #-}
@@ -37,7 +38,7 @@ import Text.Printf (printf)
 
 import System.IO.Unsafe (unsafePerformIO)
 
-import GhcPlugins
+import GhcPlugins hiding (substTy)
 import Class (classAllSelIds)
 import CoreArity (etaExpand)
 import CoreLint (lintExpr)
@@ -45,11 +46,13 @@ import CoreSeq (seqExpr)
 import DynamicLoading
 import Kind (isLiftedTypeKind)
 import MkId (mkDictSelRhs)
+import qualified OccName
 import Pair (Pair(..))
 import Type (coreView,mkAppTy)
 import TcType (isIntegerTy)
 import FamInstEnv (normaliseType)
 import SimplCore (simplifyExpr)
+import TyCon                            -- TODO: explicit imports
 import TyCoRep                          -- TODO: explicit imports
 
 import ReificationRules.Misc (Unop,Binop)
@@ -64,7 +67,6 @@ import ReificationRules.Simplify (simplifyE)
 -- CoreM and use it in the reify rule, which must be pure.
 data ReifyEnv = ReifyEnv { appV       :: Id
                          , lamV       :: Id
-                      -- , varV       :: Id
                          , letV       :: Id
                          , letPairV   :: Id
                          , reifyV     :: Id
@@ -77,8 +79,6 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , repr'V     :: Id
                          , abstPV     :: Id
                          , reprPV     :: Id
-                         , fstV       :: Id
-                         , sndV       :: Id
                          , idV        :: Id
                          , composeV   :: Id
                          , prePostV   :: Id
@@ -253,11 +253,9 @@ reify (ReifyEnv {..}) guts dflags inScope =
    literal = hasLit dflags guts inScope
    repMeth :: ReExpr
    repMeth (collectArgs -> (Var v, args@(length -> 4))) =
-     do nm <- stripPrefix "ReificationRules.HOS." (fqVarName v)
-        case nm of
-          "abst" -> wrap abstPV
-          "repr" -> wrap reprPV
-          _      -> Nothing
+     if | v == abstV -> wrap abstPV
+        | v == reprV -> wrap reprPV
+        | otherwise  -> Nothing
     where
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
@@ -318,6 +316,9 @@ reify (ReifyEnv {..}) guts dflags inScope =
    recast co = pprPanic "recast: unhandled coercion" (ppr co)
    -- recast co = dtrace "recast: unhandled coercion" (ppr co) Nothing
    recastRep v get co = ($ v) <$> hrMeth (get (coercionKind co))
+   -- TODO: Check the type, in case the coercion is not
+   -- Rep a -> a or a -> Rep a.
+
    unfolded :: Unop CoreExpr
    unfolded e = fromMaybe e (unfoldMaybe e)               
    -- Unfold application head, if possible.
@@ -543,21 +544,24 @@ mkReifyEnv :: [CommandLineOption] -> CoreM ReifyEnv
 mkReifyEnv opts = do
   -- liftIO $ putStrLn ("Options: " ++ show opts)
   hsc_env <- getHscEnv
-  let lookupRdr :: ModuleName -> (Name -> CoreM a) -> String -> CoreM a
-      lookupRdr modu mk str =
-        maybe (panic err) mk =<<
-          liftIO (lookupRdrNameInModuleForPlugins hsc_env modu
-                     (mkVarUnqual (fsLit str)))
+  let lookupRdr :: ModuleName -> (String -> OccName) -> (Name -> CoreM a) -> String -> CoreM a
+      lookupRdr modu mkOcc mkThing str =
+        maybe (panic err) mkThing =<<
+          liftIO (lookupRdrNameInModuleForPlugins hsc_env modu (Unqual (mkOcc str)))
        where
          err = "reify installation: couldn't find "
                ++ str ++ " in " ++ moduleNameString modu
-      findId modu = lookupRdr (mkModuleName modu) lookupId
+      lookupTh mkOcc mk modu = lookupRdr (mkModuleName modu) mkOcc mk
+      findId = lookupTh mkVarOcc  lookupId
+      findDc = lookupTh mkDataOcc lookupDataCon
+      findTc = lookupTh mkTcOcc   lookupTyCon
       findExpId   = findId "ReificationRules.HOS"
+      findRepDc   = findDc "Circat.Rep"
+      findRepTc   = findTc "Circat.Rep"
       findTupleId = findId "Data.Tuple"
       findBaseId  = findId "GHC.Base"
       findMiscId  = findId "ReificationRules.Misc"
       findMonoId  = findId "ReificationRules.MonoPrims"
---   varV     <- findExpId "varP"
   appV     <- findExpId "appP"
   lamV     <- findExpId "lamP"
   letV     <- findExpId "letP"
@@ -571,8 +575,7 @@ mkReifyEnv opts = do
   repr'V   <- findExpId "repr'"
   abstPV   <- findExpId "abstP"
   reprPV   <- findExpId "reprP"
-  fstV     <- findTupleId "fst"
-  sndV     <- findTupleId "snd"
+  undefV   <- findExpId "undef"
   idV      <- findBaseId "id"
   composeV <- findBaseId "."
   prePostV <- findMiscId "-->"
@@ -581,10 +584,48 @@ mkReifyEnv opts = do
       primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
                          <$> lookupPrim v
       isPrim = isJust . lookupPrim
-  hasRepMeth <- hasRepMethodM (repTcsFromAbstPTy (varType abstPV))
+  hasRepTc <- findRepTc "HasRep"
+  repTc    <- findRepTc "Rep"
+  hasRepMeth <- hasRepMethodM (hasRepTc,repTc) undefV
   toLitV <- findExpId "litE"
-  let hasLitTc = tcFromToLitETy (varType toLitV)
+  hasLitTc <- findTc "ReificationRules.Prim" "HasLit"
   hasLit <- toLitM (hasLitTc,toLitV)
+
+#if 0
+
+  primThing <-
+    maybe (panic "Prim lookup failure") lookupThing =<<
+      (liftIO $
+        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "ReificationRules.Prim")
+           (Unqual (mkTcOcc "Prim")))
+  pprTrace "mkReifyEnv Prim thing:" (ppr primThing) (return ())
+
+  litPThing <-
+    maybe (panic "LitP lookup failure") lookupThing =<<
+      (liftIO $
+        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "ReificationRules.Prim")
+           (Unqual (mkDataOcc "LitP")))
+  pprTrace "mkReifyEnv LitP thing:" (ppr litPThing) (return ())
+
+  hasRepThing <-
+    maybe (panic "HasRep lookup failure") lookupThing =<<
+      (liftIO $
+        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "Circat.Rep")
+           (Unqual (mkDataOcc "HasRep")))
+  pprTrace "mkReifyEnv HasRep thing:" (ppr hasRepThing) (return ())
+
+  hasLitThing <-
+    maybe (panic "HasLit lookup failure") lookupThing =<<
+      (liftIO $
+        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "ReificationRules.Prim")
+           (Unqual (mkDataOcc "HasLit")))
+  pprTrace "mkReifyEnv HasLit thing:" (ppr hasLitThing) (return ())
+
+--   hasLitDc  <- lookupTh mkDataOcc lookupTyCon lookupDataCon "ReificationRules.Prim" "C:HasLit"
+               -- findDc "ReificationRules.Prim" "C:HasLit"
+--   hasRepV <- findRepDc "HasRep"
+#endif
+
   let tracing = "trace" `elem` opts
   return (ReifyEnv { .. })
  where
@@ -600,41 +641,14 @@ mkReifyEnv opts = do
 -- identifiers. I'd rather learn how to look up the types and tycons directly,
 -- as I do with (value) identifiers.
 
--- Extract HasRep and Rep from the type of abst
-repTcsFromAbstTy :: Type -> (TyCon,TyCon)
-repTcsFromAbstTy abstTy = (hasRepTc, repTc)
- where
-   -- abst :: HasRep a => Rep a -> a
-   ([hasRepTy,repa],_) = splitFunTys (dropForAlls abstTy)
-   Just hasRepTc       = tyConAppTyCon_maybe hasRepTy
-   Just repTc          = tyConAppTyCon_maybe repa
-
--- Extract HasRep and Rep from the type of abstPV
-repTcsFromAbstPTy :: Type -> (TyCon,TyCon)
-repTcsFromAbstPTy abstPvTy = -- pprTrace "repTcsFromAbstPTy. eqTy" (ppr eqTy) $
-                             (hasRepTc, repTc)
- where
-   -- abstP :: (HasRep a, Rep a ~~ a') => EP (a' -> a)
-   ([hasRepTy,eqTy],_)       = splitFunTys (dropForAlls abstPvTy)
-   Just hasRepTc             = tyConAppTyCon_maybe hasRepTy
-   Just [_ka, _ka',repATy,_] = tyConAppArgs_maybe eqTy
-   Just repTc                = tyConAppTyCon_maybe repATy
-
--- Extract HasLit TyCon from the type of toLitE
-tcFromToLitETy :: Type -> TyCon
-tcFromToLitETy toLitETy = tc
- where
-   -- litE :: HasLit a => a -> EP a
-   (hasLitA,_) = splitFunTy (dropForAlls toLitETy)
-   Just tc = tyConAppTyCon_maybe hasLitA
-
 type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
-hasRepMethodM :: (TyCon,TyCon) -> CoreM HasRepMeth
-hasRepMethodM (hasRepTc,repTc) =
+hasRepMethodM :: (TyCon,TyCon) -> Id -> CoreM HasRepMeth
+hasRepMethodM (hasRepTc,repTc) undefV =
   do hscEnv <- getHscEnv
      eps    <- liftIO (hscEPS hscEnv)
      return $ \ dflags guts inScope ty ->
+       -- newtypeHasRepMethodM ty <|>
        let (mkEqBox -> eq,ty') =
              normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
                            Nominal (mkTyConApp repTc [ty])  -- Representational ??
@@ -647,6 +661,29 @@ hasRepMethodM (hasRepTc,repTc) =
          -- pprTrace "hasRepMeth ty" (ppr ty <+> text "-->" <+> ppr ty') $
          mfun <$> buildDictionary hscEnv dflags guts inScope
                     (mkTyConApp hasRepTc [ty])
+ where
+   newtypeHasRepMethodM :: Type -> Maybe (Id -> CoreExpr)
+   newtypeHasRepMethodM ty =
+     do (tc,tyArgs)       <- splitTyConApp_maybe ty
+        (tvs,repTy,_coax) <- unwrapNewTyCon_maybe tc
+        let dict = varApps undefV [mkTyConApp hasRepTc [ty]] []
+            ty'  = substTy (zipTvSubst tvs tyArgs) repTy
+            co   = UnivCo (PluginProv "RepNewtype")
+                     Representational (mkTyConApp repTc [ty]) ty'
+        return $ \ meth ->
+          varApps meth [ty,ty'] [dict,mkEqBox co]
+
+-- unwrapNewTyCon_maybe :: TyCon -> Maybe ([TyVar], Type, CoAxiom Unbranched)
+-- splitTyConApp_maybe :: Type -> Maybe (TyCon, [Type])
+
+-- zipVarEnv         :: [Var] -> [a] -> VarEnv a
+
+-- zipTvSubst :: [TyVar] -> [Type] -> TCvSubst
+
+-- TyCoRep.substTy ::
+--   ?callStack::GHC.Stack.Types.CallStack => TCvSubst -> Type -> Type
+--   	-- Defined in ‘TyCoRep’
+
 
 type HasLit = DynFlags -> ModGuts -> InScopeEnv -> ReExpr
 
