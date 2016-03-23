@@ -9,7 +9,7 @@
 
 {-# OPTIONS_GHC -Wall #-}
 
-{-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
+-- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
 {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
 
 ----------------------------------------------------------------------
@@ -26,33 +26,25 @@
 
 module ReificationRules.Plugin (plugin) where
 
-import Control.Arrow (first,second)
 import Control.Applicative (liftA2,(<|>))
-import Control.Monad (unless,guard,(<=<))
+import Control.Monad (unless,guard)
 import Data.Maybe (fromMaybe,isJust)
-import Data.List (stripPrefix,isPrefixOf,isSuffixOf,elemIndex)
+import Data.List (isPrefixOf,isSuffixOf,elemIndex)
 import Data.Char (toLower)
 import qualified Data.Map as M
-import qualified Data.Set as S
 import Text.Printf (printf)
-
-import System.IO.Unsafe (unsafePerformIO)
 
 import GhcPlugins hiding (substTy)
 import Class (classAllSelIds)
 import CoreArity (etaExpand)
 import CoreLint (lintExpr)
-import CoreSeq (seqExpr)
 import DynamicLoading
-import Kind (isLiftedTypeKind)
+-- import Kind (isLiftedTypeKind)
 import MkId (mkDictSelRhs)
-import qualified OccName
 import Pair (Pair(..))
-import Type (coreView,mkAppTy)
-import TcType (isIntegerTy)
+import Type (coreView)
+-- import TcType (isIntegerTy)
 import FamInstEnv (normaliseType)
-import SimplCore (simplifyExpr)
-import TyCon                            -- TODO: explicit imports
 import TyCoRep                          -- TODO: explicit imports
 
 import ReificationRules.Misc (Unop,Binop)
@@ -263,10 +255,6 @@ reify (ReifyEnv {..}) guts dflags inScope =
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
    repMeth _ = Nothing
-   -- Has the form evalP x
-   isEvalVar :: CoreExpr -> Bool
-   isEvalVar (Var ev `App` Type _ `App` (Var _)) = ev == evalV
-   isEvalVar _ = False
    -- Experimental
    cheap :: CoreExpr -> Bool
    -- cheap e | pprTrace "cheap?" (ppr e) False = undefined
@@ -328,26 +316,22 @@ reify (ReifyEnv {..}) guts dflags inScope =
    unfoldMaybe :: ReExpr
    unfoldMaybe = -- traceRewrite "unfold" $
                  onAppsFun inlineMaybe
-   onInlineFail :: Id -> Maybe CoreExpr
-   onInlineFail v =
-     pprTrace "onInlineFail idDetails" (ppr v <+> colon <+> ppr (idDetails v))
-     Nothing
    inlineMaybe :: Id -> Maybe CoreExpr
    inlineMaybe v = guard (not (isPrim v)) >>
                    (inlineId <+ -- onInlineFail <+ traceRewrite "inlineClassOp"
                                 inlineClassOp) v
-   -- See match_inline from PrelRules, as used with 'inline'.
-   -- Temporary. Show info about failed inlinings
-   inlineable :: Id -> Bool
-   inlineable = isJust . inlineMaybe
+   -- onInlineFail :: Id -> Maybe CoreExpr
+   -- onInlineFail v =
+   --   pprTrace "onInlineFail idDetails" (ppr v <+> colon <+> ppr (idDetails v))
+   --   Nothing
    -- Tracing
    dtrace :: String -> SDoc -> a -> a
    dtrace str doc | tracing   = pprTrace str doc
                   | otherwise = id
    pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
    pprTrans str a b = dtrace str (ppr a $$ text "-->" $$ ppr b) b
-   traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
-   traceUnop str f a = pprTrans str a (f a)
+   -- traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
+   -- traceUnop str f a = pprTrans str a (f a)
    traceRewrite :: (Outputable a, Outputable b, Functor f) =>
                    String -> Unop (a -> f b)
    traceRewrite str f a = pprTrans str a <$> f a
@@ -388,11 +372,6 @@ onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
 onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
 onAppsFun _ _ = Nothing
 
-hasUnfolding :: Id -> Bool
-hasUnfolding (uqVarName -> "inline") = False
-hasUnfolding (idUnfolding -> NoUnfolding) = False
-hasUnfolding _ = True
-
 -- Don't do abstReprCase, since it's been done already. Check the outer function
 -- being applied to see whether it's abst', $fHasRepFoo_$cabst (for some Foo),
 -- or is a constructor worker or wrapper.
@@ -417,8 +396,8 @@ infixl 3 <+
 varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
 varApps v tys es = mkApps (Var v) (map Type tys ++ es)
 
-reifiableKind :: Kind -> Bool
-reifiableKind = isLiftedTypeKind
+-- reifiableKind :: Kind -> Bool
+-- reifiableKind = isLiftedTypeKind
 
 -- Types we know how to handle
 reifiableType :: Type -> Bool
@@ -561,7 +540,6 @@ mkReifyEnv opts = do
       findExpId   = findId "ReificationRules.HOS"
       findRepDc   = findDc "Circat.Rep"
       findRepTc   = findTc "Circat.Rep"
-      findTupleId = findId "Data.Tuple"
       findBaseId  = findId "GHC.Base"
       findMiscId  = findId "ReificationRules.Misc"
       findMonoId  = findId "ReificationRules.MonoPrims"
@@ -596,11 +574,6 @@ mkReifyEnv opts = do
   let [hasRepDc] = tyConDataCons hasRepTc
       tracing    = "trace" `elem` opts
   return (ReifyEnv { .. })
- where
-   -- Used to extract Prim tycon argument
-   tyArg1 :: Unop Type
-   tyArg1 (tyConAppArgs_maybe -> Just [arg]) = arg
-   tyArg1 ty = pprPanic "mkReifyEnv/tyArg1 non-unary" (ppr ty)
 
 -- * I'm assuming that it's safe to reuse x's unique here, since x is
 -- eliminated. If not, use uniqAway x and then setVarType.
@@ -679,8 +652,8 @@ toLitM (hasLitTc,toLitV) =
 on_mg_rules :: Unop [CoreRule] -> Unop ModGuts
 on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
 
-fqVarName :: Var -> String
-fqVarName = qualifiedName . varName
+-- fqVarName :: Var -> String
+-- fqVarName = qualifiedName . varName
 
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
