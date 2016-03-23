@@ -83,6 +83,7 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , composeV   :: Id
                          , prePostV   :: Id
                          , hasRepMeth :: HasRepMeth
+                         , hasRepDc   :: DataCon
                          , hasLit     :: HasLit
                          , tracing    :: Bool
                          }
@@ -228,7 +229,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
              , Just reV <- tryReify v
        ->
         Just (varApps appV [dom,ran] [reU,reV])
-     _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
+     _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
    -- v --> ("v'", eval v')
@@ -256,6 +257,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
      if | v == abstV -> wrap abstPV
         | v == reprV -> wrap reprPV
         | otherwise  -> Nothing
+     -- TODO: Rewrite using List.lookup with [(abstV,abstPV),(reprV,reprPV)]
+     -- and fmap (\ prim -> mkApps (Var prim) args)
     where
       wrap :: Id -> Maybe CoreExpr
       wrap prim = Just (mkApps (Var prim) args)
@@ -468,21 +471,25 @@ reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
     Primitive translation
 --------------------------------------------------------------------}
 
+-- Temporary alias
+doubli :: String
+doubli = "Double" -- "Doubli"
+
 stdClassOpInfo :: [(String,String,[String],[(String,String)])]
 stdClassOpInfo =
-   [ ( "Eq","BinRel",["Bool","Int","Doubli"]
+   [ ( "Eq","BinRel",["Bool","Int",doubli]
      , [("==","Eq"), ("/=","Ne")])
-   , ( "Ord","BinRel",["Bool","Int","Doubli"]
+   , ( "Ord","BinRel",["Bool","Int",doubli]
      , [("<","Lt"),(">","Gt"),("<=","Le"),(">=","Ge")])
-   , ( "Num","Unop",["Int","Doubli"]
+   , ( "Num","Unop",["Int",doubli]
      , [("negate","Negate")])
-   , ( "Num","Binop",["Int","Doubli"]
+   , ( "Num","Binop",["Int",doubli]
      , [("+","Add"),("-","Sub"),("*","Mul")])
-   , ( "Floating","Unop",["Doubli"]
+   , ( "Floating","Unop",[doubli]
      , [("exp","Exp"),("cos","Cos"),("sin","Sin")])
-   , ( "Fractional","Unop",["Doubli"]
+   , ( "Fractional","Unop",[doubli]
      , [("recip","Recip")])
-   , ( "Fractional","Binop",["Doubli"]
+   , ( "Fractional","Binop",[doubli]
      , [("/","Divide")])
    ]
 
@@ -584,12 +591,13 @@ mkReifyEnv opts = do
       primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
                          <$> lookupPrim v
       isPrim = isJust . lookupPrim
-  hasRepTc <- findRepTc "HasRep"
-  repTc    <- findRepTc "Rep"
+  hasRepTc   <- findRepTc "HasRep"
+  repTc      <- findRepTc "Rep"
   hasRepMeth <- hasRepMethodM (hasRepTc,repTc) undefV
   toLitV <- findExpId "litE"
   hasLitTc <- findTc "ReificationRules.Prim" "HasLit"
   hasLit <- toLitM (hasLitTc,toLitV)
+  let [hasRepDc] = tyConDataCons hasRepTc
 
 #if 0
 
@@ -607,12 +615,27 @@ mkReifyEnv opts = do
            (Unqual (mkDataOcc "LitP")))
   pprTrace "mkReifyEnv LitP thing:" (ppr litPThing) (return ())
 
-  hasRepThing <-
-    maybe (panic "HasRep lookup failure") lookupThing =<<
+  hasRepClsThing <-
+    maybe (panic "HasRep class lookup failure") lookupThing =<<
+      (liftIO $
+        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "Circat.Rep")
+           (Unqual (mkClsOcc "HasRep")))
+  pprTrace "mkReifyEnv HasRep class thing:" (ppr hasRepClsThing) (return ())
+
+  hasRepClsTc <-
+    maybe (panic "HasRep class-for-dcs lookup failure") lookupTyCon =<<
+      (liftIO $
+        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "Circat.Rep")
+           (Unqual (mkClsOcc "HasRep")))
+  pprTrace "mkReifyEnv HasRep class tc:" (ppr hasRepClsTc) (return ())
+  pprTrace "mkReifyEnv HasRep class datacon" (ppr (head (tyConDataCons hasRepClsTc))) (return ())
+
+  hasRepDcThing <-
+    maybe (panic "HasRep datacon lookup failure") lookupThing =<<
       (liftIO $
         lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "Circat.Rep")
            (Unqual (mkDataOcc "HasRep")))
-  pprTrace "mkReifyEnv HasRep thing:" (ppr hasRepThing) (return ())
+  pprTrace "mkReifyEnv HasRep datacon thing:" (ppr hasRepDcThing) (return ())
 
   hasLitThing <-
     maybe (panic "HasLit lookup failure") lookupThing =<<
