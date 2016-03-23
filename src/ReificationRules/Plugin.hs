@@ -556,7 +556,6 @@ mkReifyEnv opts = do
   repr'V   <- findExpId "repr'"
   abstPV   <- findExpId "abstP"
   reprPV   <- findExpId "reprP"
-  undefV   <- findExpId "undef"
   idV      <- findBaseId "id"
   composeV <- findBaseId "."
   prePostV <- findMiscId "-->"
@@ -567,7 +566,7 @@ mkReifyEnv opts = do
       isPrim = isJust . lookupPrim
   hasRepTc   <- findRepTc "HasRep"
   repTc      <- findRepTc "Rep"
-  hasRepMeth <- hasRepMethodM (hasRepTc,repTc) undefV
+  hasRepMeth <- hasRepMethodM (hasRepTc,repTc)
   toLitV     <- findExpId "litE"
   hasLitTc   <- findTc "ReificationRules.Prim" "HasLit"
   hasLit     <- toLitM (hasLitTc,toLitV)
@@ -584,8 +583,8 @@ mkReifyEnv opts = do
 
 type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
-hasRepMethodM :: (TyCon,TyCon) -> Id -> CoreM HasRepMeth
-hasRepMethodM (hasRepTc,repTc) undefV =
+hasRepMethodM :: (TyCon,TyCon) -> CoreM HasRepMeth
+hasRepMethodM (hasRepTc,repTc) =
   do hscEnv <- getHscEnv
      eps    <- liftIO (hscEPS hscEnv)
      return $ \ dflags guts inScope ty ->
@@ -602,6 +601,7 @@ hasRepMethodM (hasRepTc,repTc) undefV =
          -- pprTrace "hasRepMeth ty" (ppr ty <+> text "-->" <+> ppr ty') $
          mfun <$> buildDictionary hscEnv dflags guts inScope
                     (mkTyConApp hasRepTc [ty])
+#if 0
  where
    newtypeHasRepMethodM :: Type -> Maybe (Id -> CoreExpr)
    newtypeHasRepMethodM ty =
@@ -613,6 +613,7 @@ hasRepMethodM (hasRepTc,repTc) undefV =
                      Representational (mkTyConApp repTc [ty]) ty'
         return $ \ meth ->
           varApps meth [ty,ty'] [dict,mkEqBox co]
+#endif
 
 -- unwrapNewTyCon_maybe :: TyCon -> Maybe ([TyVar], Type, CoAxiom Unbranched)
 -- splitTyConApp_maybe :: Type -> Maybe (TyCon, [Type])
