@@ -24,6 +24,8 @@ import ReificationRules.Prim (Prim(..))
 import ReificationRules.Misc (Unop,Binop,BinRel)
 
 -- Synonyms, just because I don't know how to look up constructors successfully.
+-- 
+-- TODO: Revisit, now that I do know how.
 
 notP  = NotP
 andP  = AndP
