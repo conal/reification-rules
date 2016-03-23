@@ -393,8 +393,14 @@ infixl 3 <+
 (<+) :: Binop (a -> Maybe b)
 (<+) = liftA2 (<|>)
 
+apps :: CoreExpr -> [Type] -> [CoreExpr] -> CoreExpr
+apps e tys es = mkApps e (map Type tys ++ es)
+
 varApps :: Id -> [Type] -> [CoreExpr] -> CoreExpr
-varApps v tys es = mkApps (Var v) (map Type tys ++ es)
+varApps = apps . Var
+
+conApps :: DataCon -> [Type] -> [CoreExpr] -> CoreExpr
+conApps = varApps . dataConWorkId
 
 -- reifiableKind :: Kind -> Bool
 -- reifiableKind = isLiftedTypeKind
