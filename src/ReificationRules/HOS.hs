@@ -43,7 +43,6 @@ import Circat.Misc (Unop,Binop,Ternop,(:*))
 import qualified Circat.Rep as Rep
 import Circat.Rep (HasRep,Rep)
 
--- import Circat.Doubli
 -- import Circat.Pair (Pair(..)) -- TEMP
 -- import qualified Circat.RTree as R
 -- import qualified Circat.LTree as L
@@ -125,8 +124,6 @@ type Name# = Addr#
 appP :: forall a b. EP (a -> b) -> EP a -> EP b
 appP = app
 {-# NOINLINE appP #-}
-
--- ## BAZINGA!
 
 lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
 lamP x = lam (unpackCString# x)
@@ -215,7 +212,6 @@ litE :: HasLit a => a -> EP a
 litE = constP . LitP . toLit
 
 #ifdef Testing
-
 {--------------------------------------------------------------------
     Tests
 --------------------------------------------------------------------}

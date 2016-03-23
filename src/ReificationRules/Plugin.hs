@@ -471,25 +471,21 @@ reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
     Primitive translation
 --------------------------------------------------------------------}
 
--- Temporary alias
-doubli :: String
-doubli = "Double" -- "Doubli"
-
 stdClassOpInfo :: [(String,String,[String],[(String,String)])]
 stdClassOpInfo =
-   [ ( "Eq","BinRel",["Bool","Int",doubli]
+   [ ( "Eq","BinRel",["Bool","Int","Double"]
      , [("==","Eq"), ("/=","Ne")])
-   , ( "Ord","BinRel",["Bool","Int",doubli]
+   , ( "Ord","BinRel",["Bool","Int","Double"]
      , [("<","Lt"),(">","Gt"),("<=","Le"),(">=","Ge")])
-   , ( "Num","Unop",["Int",doubli]
+   , ( "Num","Unop",["Int","Double"]
      , [("negate","Negate")])
-   , ( "Num","Binop",["Int",doubli]
+   , ( "Num","Binop",["Int","Double"]
      , [("+","Add"),("-","Sub"),("*","Mul")])
-   , ( "Floating","Unop",[doubli]
+   , ( "Floating","Unop",["Double"]
      , [("exp","Exp"),("cos","Cos"),("sin","Sin")])
-   , ( "Fractional","Unop",[doubli]
+   , ( "Fractional","Unop",["Double"]
      , [("recip","Recip")])
-   , ( "Fractional","Binop",[doubli]
+   , ( "Fractional","Binop",["Double"]
      , [("/","Divide")])
    ]
 
@@ -594,62 +590,11 @@ mkReifyEnv opts = do
   hasRepTc   <- findRepTc "HasRep"
   repTc      <- findRepTc "Rep"
   hasRepMeth <- hasRepMethodM (hasRepTc,repTc) undefV
-  toLitV <- findExpId "litE"
-  hasLitTc <- findTc "ReificationRules.Prim" "HasLit"
-  hasLit <- toLitM (hasLitTc,toLitV)
+  toLitV     <- findExpId "litE"
+  hasLitTc   <- findTc "ReificationRules.Prim" "HasLit"
+  hasLit     <- toLitM (hasLitTc,toLitV)
   let [hasRepDc] = tyConDataCons hasRepTc
-
-#if 0
-
-  primThing <-
-    maybe (panic "Prim lookup failure") lookupThing =<<
-      (liftIO $
-        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "ReificationRules.Prim")
-           (Unqual (mkTcOcc "Prim")))
-  pprTrace "mkReifyEnv Prim thing:" (ppr primThing) (return ())
-
-  litPThing <-
-    maybe (panic "LitP lookup failure") lookupThing =<<
-      (liftIO $
-        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "ReificationRules.Prim")
-           (Unqual (mkDataOcc "LitP")))
-  pprTrace "mkReifyEnv LitP thing:" (ppr litPThing) (return ())
-
-  hasRepClsThing <-
-    maybe (panic "HasRep class lookup failure") lookupThing =<<
-      (liftIO $
-        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "Circat.Rep")
-           (Unqual (mkClsOcc "HasRep")))
-  pprTrace "mkReifyEnv HasRep class thing:" (ppr hasRepClsThing) (return ())
-
-  hasRepClsTc <-
-    maybe (panic "HasRep class-for-dcs lookup failure") lookupTyCon =<<
-      (liftIO $
-        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "Circat.Rep")
-           (Unqual (mkClsOcc "HasRep")))
-  pprTrace "mkReifyEnv HasRep class tc:" (ppr hasRepClsTc) (return ())
-  pprTrace "mkReifyEnv HasRep class datacon" (ppr (head (tyConDataCons hasRepClsTc))) (return ())
-
-  hasRepDcThing <-
-    maybe (panic "HasRep datacon lookup failure") lookupThing =<<
-      (liftIO $
-        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "Circat.Rep")
-           (Unqual (mkDataOcc "HasRep")))
-  pprTrace "mkReifyEnv HasRep datacon thing:" (ppr hasRepDcThing) (return ())
-
-  hasLitThing <-
-    maybe (panic "HasLit lookup failure") lookupThing =<<
-      (liftIO $
-        lookupRdrNameInModuleForPlugins hsc_env (mkModuleName "ReificationRules.Prim")
-           (Unqual (mkDataOcc "HasLit")))
-  pprTrace "mkReifyEnv HasLit thing:" (ppr hasLitThing) (return ())
-
---   hasLitDc  <- lookupTh mkDataOcc lookupTyCon lookupDataCon "ReificationRules.Prim" "C:HasLit"
-               -- findDc "ReificationRules.Prim" "C:HasLit"
---   hasRepV <- findRepDc "HasRep"
-#endif
-
-  let tracing = "trace" `elem` opts
+      tracing    = "trace" `elem` opts
   return (ReifyEnv { .. })
  where
    -- Used to extract Prim tycon argument

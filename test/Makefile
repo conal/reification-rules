@@ -53,8 +53,7 @@ GhcFlags += -fno-specialise
 # # Trace reification
 # GhcFlags += -fplugin-opt=$(plugin):trace
 
-compile=$(ghc) -O -fplugin=$(plugin) $(GhcFlags)
-# compile=$(ghc) -O $(GhcFlags)
+compile=time $(ghc) -O -fplugin=$(plugin) $(GhcFlags)
 
 Tests: ../dist Tests.hs Makefile
 	$(compile) $@
@@ -85,6 +84,14 @@ SHAPED_HI_DIR = ../../shaped-types/dist/build/ShapedTypes
 %.iface: $(SHAPED_HI_DIR)/%.hi
 	$(ghc) --show-iface $(SHAPED_HI_DIR)/$*.hi > $*.iface
 
-ifaces: HOS.iface Pair.iface
+SHAPED_HI_DIR = ../../shaped-types/dist/build/ShapedTypes
+
+CIRCAT_HI_DIR = ../../circat/dist/build/Circat
+
+%.iface: $(CIRCAT_HI_DIR)/%.hi
+	$(ghc) --show-iface $(CIRCAT_HI_DIR)/$*.hi > $*.iface
+
+ifaces: HOS.iface Pair.iface Circuit.iface Rep.iface
+
 
 

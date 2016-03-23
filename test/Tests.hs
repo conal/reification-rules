@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, LambdaCase, GADTs, TypeOperators, DataKinds #-}
+{-# language CPP, LambdaCase, GADTs, TypeOperators, DataKinds #-}
 
 {-# OPTIONS_GHC -Wall -fno-warn-unticked-promoted-constructors -fno-warn-missing-signatures #-}
 
@@ -30,7 +30,7 @@ import ReificationRules.Misc (Unop,Binop,BinRel,transpose)
 import ReificationRules.HOS (EP,repr,abst,reify)
 import ReificationRules.Run
 
-import Circat.Doubli
+import Circat.Complex
 
 -- Seems to be needed for Rep (Sum Int) --> Int
 -- TODO: Find a better way.
@@ -42,6 +42,8 @@ import ShapedTypes.Vec
 import qualified ShapedTypes.RPow as R
 import qualified ShapedTypes.LPow as L
 import ShapedTypes.Linear
+import ShapedTypes.Scan
+import ShapedTypes.FFT
 
 type RTree = R.Pow Pair
 type LTree = L.Pow Pair
@@ -52,7 +54,14 @@ main :: IO ()
 
 main = go "foo" t
 
--- main = goSep "foo" 10 t
+-- main = goSep "foo" 2 t
+
+
+-- main = goSep "fft-r2-8" 16 (fft :: RTree N8 C -> LTree N8 C)
+
+-- main = goSep "fft-l2-6" 12 (fft :: LTree N6 C -> RTree N6 C)
+
+-- main = goSep "fft-r3-4" 4 (fft :: R.Pow (Vec N3) N4 C -> L.Pow (Vec N3) N4 C)
 
 {--------------------------------------------------------------------
     Working examples
@@ -75,6 +84,11 @@ main = go "foo" t
 -- t = 3 :: Int
 
 -- t = 3 :: Float
+
+-- t :: Double -> Double -> Bool
+-- t = \ x y -> x > y + 3
+
+-- t = 3.0 :: Double
 
 -- t = \ x y -> x || not y
 
@@ -141,7 +155,7 @@ main = go "foo" t
 
 -- t = mappend :: Binop (Sum Int)
 
--- t = sum :: RTree N6 Int -> Int
+t = sum :: RTree N6 Int -> Int
 
 -- t = transpose :: Unop (Pair (Pair Bool))
 
@@ -154,21 +168,45 @@ main = go "foo" t
 
 -- t = dotG :: Pair (RTree N1 Int) -> Int
 
-t = (<.>) :: RTree N5 Int -> RTree N5 Int -> Int
+-- t = (<.>) :: RTree N5 Int -> RTree N5 Int -> Int
+
+-- t = ($@) :: MatrixR N3 N2 Int -> RTree N3 Int -> RTree N2 Int
+
+-- t = ($@) :: MatrixL N3 N2 Int -> LTree N3 Int -> LTree N2 Int
+
+-- t = (.@) :: MatrixR N3 N4 Int -> MatrixR N2 N3 Int -> MatrixR N2 N4 Int
+
+-- t = lsums :: Pair Int -> (Pair Int, Int)
+
+-- t = lsums :: RTree N4 Int -> (RTree N4 Int, Int)
+
+-- t = lsums :: LTree N4 Int -> (LTree N4 Int, Int)
+
+-- t = powers :: Int -> RTree N4 Int
+
+-- t = evalPoly :: RTree N4 Int -> Int -> Int
+
+-- The tree lscan examples (lsums, powers, evalPoly etc) work if I *don't* use
+-- genericLscan
+
+-- t = fft :: Unop (Pair C)
+
+-- t = fft :: LTree N3 C -> RTree N3 C
+
+-- t = fft :: RTree N4 C -> LTree N4 C
 
 {--------------------------------------------------------------------
     In progress
 --------------------------------------------------------------------}
 
+-- t = fft :: Unop (Vec N3 C)
+
 {--------------------------------------------------------------------
     Broken
 --------------------------------------------------------------------}
 
--- -- I don't yet handle Double. To do: switch from Doubli to Double in circat.
--- t :: Double -> Double -> Bool
--- t = \ x y -> x > y + 3
-
--- t = 3.0 :: Doubli
+-- -- StateL casts
+-- t = lsums :: Vec N4 Int -> (Vec N4 Int, Int)
 
 {--------------------------------------------------------------------
     Helpers
@@ -177,8 +215,19 @@ t = (<.>) :: RTree N5 Int -> RTree N5 Int -> Int
 -- Generalized matrices
 
 type Matrix  m n a = Vec    n (Vec    m a)
-type MatrixT m n a = RTree  n (RTree  m a)
+type MatrixR m n a = RTree  n (RTree  m a)
+type MatrixL m n a = LTree  n (LTree  m a)
+
 -- type MatrixG p q a = Ragged q (Ragged p a)
+
+
+powers :: (LScan f, Applicative f, Num a) => a -> f a
+powers = fst . lproducts . pure
+
+evalPoly :: (LScan f, Applicative f, Foldable f, Num a) => f a -> a -> a
+evalPoly coeffs x = coeffs <.> powers x
+
+type C = Complex Double
 
 #if 0
 

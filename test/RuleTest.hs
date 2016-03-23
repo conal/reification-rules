@@ -35,8 +35,6 @@ import ReificationRules.HOS (EP,toE,reifyP,repr,abst,constP,abstP)
 import ReificationRules.Prim (Prim(..))
 import ReificationRules.Run (run,Okay)
 
-import Circat.Doubli
-
 import TypeUnary.TyNat (S,Z)
 import Circat.Pair
 import Circat.RTree

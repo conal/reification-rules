@@ -55,8 +55,6 @@ import Circat.Circuit (GenBuses,(:>)
 -- TODO: sort out the two uses of xor and simplify the Circat.Classes imports
 -- and uses.
 
-import Circat.Doubli
-
 import ReificationRules.ShowUtils
 import ReificationRules.Misc
 
@@ -70,7 +68,7 @@ data Lit :: * -> * where
   BoolL   :: Bool   -> Lit Bool
   IntL    :: Int    -> Lit Int
   FloatL  :: Float  -> Lit Float
-  DoubleL :: Doubli -> Lit Doubli
+  DoubleL :: Double -> Lit Double
 
 -- The Unit argument is just for uniformity
 
@@ -91,7 +89,7 @@ instance HasLit Unit   where toLit = UnitL
 instance HasLit Bool   where toLit = BoolL
 instance HasLit Int    where toLit = IntL
 instance HasLit Float  where toLit = FloatL
-instance HasLit Doubli where toLit = DoubleL
+instance HasLit Double where toLit = DoubleL
 
 -- TODO: Do I still need this stuff?
 
