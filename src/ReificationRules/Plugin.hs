@@ -218,7 +218,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("eval")
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      Trying("unfold")
-     (unfoldMaybe -> Just e') -> tryReify e'
+     -- Restrict to no regular arguments
+     (unfoldTyCoDictMaybe -> Just e') -> tryReify e'
      -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
      Trying("case-apps")
@@ -325,6 +326,12 @@ reify (ReifyEnv {..}) guts dflags inScope =
 
    unfolded :: Unop CoreExpr
    unfolded e = fromMaybe e (unfoldMaybe e)               
+   -- Unfold for a var applied only to type, coercion, and dictionary arguments.
+   -- TODO: Refactor utilities to make this sort of thing simple & efficient
+   unfoldTyCoDictMaybe :: ReExpr
+   unfoldTyCoDictMaybe e
+     | (Var _, _args) <- collectTyCoDictArgs e = unfoldMaybe e
+     | otherwise                               = Nothing
    -- Unfold application head, if possible.
    unfoldMaybe :: ReExpr
    unfoldMaybe = -- traceRewrite "unfold" $
@@ -482,6 +489,8 @@ stdClassOpInfo =
      , [("negate","Negate")])
    , ( "Num","Binop",["Int","Double"]
      , [("+","Add"),("-","Sub"),("*","Mul")])
+--    , ( "","PowIop",["Int","Double"]
+--      , [("^","PowI")])
    , ( "Floating","Unop",["Double"]
      , [("exp","Exp"),("cos","Cos"),("sin","Sin")])
    , ( "Fractional","Unop",["Double"]
@@ -509,6 +518,7 @@ stdMethMap = M.fromList $
    opName :: String -> String -> String -> String -> String
    opName cls ty op prim
      | ty == "Int" && cls `elem` ["Eq","Ord"] = onHead toLower prim ++ "Int"
+--      | op `elem` ["^"]                        = op
      | otherwise                              = printf "$f%s%s_$c%s" cls ty op
 
 -- If I give up on using a rewrite rule, then I can precede the first simplifier

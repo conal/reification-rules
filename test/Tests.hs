@@ -203,13 +203,31 @@ main = go "foo" t
 -- -- StateL casts
 -- t = lsums :: Vec N12 Int -> (Vec N12 Int, Int)
 
--- t = size @Pair
-
 {--------------------------------------------------------------------
     In progress
 --------------------------------------------------------------------}
 
-t = size @(Vec N3)
+-- t x = x && not x
+
+-- t = 3 ^ (4 :: Int) :: Int
+
+t (x :: Int) = (3 :: Int) ^ x
+
+-- t = (^) :: Binop Int
+
+-- t = sum (pure 1 :: Vec N4 Int)
+
+-- t = size @Pair
+
+-- t = size @(Vec N3)
+
+-- t = size @(RTree N3)
+
+-- t = size @(LTree N8)
+
+-- t = size @(R.Pow (Vec N3) N4)
+
+
 
 -- t = fft :: Unop (Vec N3 C)
 

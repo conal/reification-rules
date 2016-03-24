@@ -170,6 +170,7 @@ data Prim :: * -> * where
   AndP,OrP,XorP    :: Prim (Bool -> Bool -> Bool)
   NegateP          :: CircuitNum a => Prim (a -> a)
   AddP,SubP,MulP   :: CircuitNum a => Prim (a -> a -> a)
+  PowIP            :: CircuitNum a => Prim (a -> Int -> a)
   RecipP           :: CircuitFractional a => Prim (a -> a)
   DivideP          :: CircuitFractional a => Prim (a -> a -> a)
   SinP, CosP, ExpP :: CircuitFloating a => Prim (a -> a)
@@ -197,6 +198,7 @@ instance Eq' (Prim a) (Prim b) where
   AddP    === AddP    = True
   SubP    === SubP    = True
   MulP    === MulP    = True
+  PowIP   === PowIP   = True
   RecipP  === RecipP  = True
   DivideP === DivideP = True
   ExpP    === ExpP    = True
@@ -232,6 +234,7 @@ instance Show (Prim a) where
   showsPrec _ AddP          = showString "(+)"
   showsPrec _ SubP          = showString "(-)"
   showsPrec _ MulP          = showString "(*)"
+  showsPrec _ PowIP         = showString "(^)"
   showsPrec _ RecipP        = showString "recip"
   showsPrec _ DivideP       = showString "(/)"
   showsPrec _ ExpP          = showString "exp"
@@ -268,6 +271,7 @@ primArrow NegateP  = negateC
 primArrow AddP     = curry add
 primArrow SubP     = curry sub
 primArrow MulP     = curry mul
+primArrow MulP     = curry powI
 primArrow RecipP   = recipC
 primArrow DivideP  = curry divide
 primArrow ExpP     = curry exp
@@ -305,6 +309,7 @@ instance -- (ClosedCat k, CoproductCat k, BoolCat k, NumCat k Int, RepCat k)
   unitArrow AddP       = unitFun (curry addC)
   unitArrow SubP       = unitFun (curry subC)
   unitArrow MulP       = unitFun (curry mulC)
+  unitArrow PowIP      = unitFun (curry powIC)
   unitArrow RecipP     = unitFun recipC
   unitArrow DivideP    = unitFun (curry divideC)
   unitArrow ExpP       = unitFun expC
@@ -343,6 +348,7 @@ instance Evalable Prim where
   eval AddP          = (+)
   eval SubP          = (-)
   eval MulP          = (*)
+  eval PowIP         = (^)
   eval RecipP        = recip
   eval DivideP       = (/)
   eval ExpP          = exp
@@ -380,6 +386,7 @@ instance PrimBasics Prim where
   pairP = PairP
 
 instance HasOpInfo Prim where
+  opInfo PowIP   = Just $ OpInfo "^"     (8,AssocRight)
   opInfo MulP    = Just $ OpInfo "*"     (7,AssocLeft )
   opInfo DivideP = Just $ OpInfo "/"     (7,AssocLeft )
   opInfo AddP    = Just $ OpInfo "+"     (6,AssocLeft )
@@ -409,6 +416,7 @@ instance Eq1' Prim where
   AddP    ==== AddP    = True
   SubP    ==== SubP    = True
   MulP    ==== MulP    = True
+  PowIP   ==== PowIP   = True
   EqP     ==== EqP     = True
   NeP     ==== NeP     = True
   LtP     ==== LtP     = True

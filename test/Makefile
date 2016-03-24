@@ -36,7 +36,8 @@ GhcFlags += -dsuppress-module-prefixes
 # GhcFlags += -ddump-rules
 # GhcFlags += -ddump-spec
 
-# GhcFlags += -ddump-rule-firings
+GhcFlags += -ddump-rule-firings
+
 # GhcFlags += -ddump-simpl-trace
 
 # GhcFlags += -dverbose-core2core

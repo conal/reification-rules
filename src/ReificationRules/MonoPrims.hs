@@ -71,3 +71,8 @@ dCos    =    CosP :: Prim (Unop   Double)
 dSin    =    SinP :: Prim (Unop   Double)
 dRecip  =  RecipP :: Prim (Unop   Double)
 dDivide = DivideP :: Prim (Binop  Double)
+
+type PowIop a = a -> Int -> a
+
+iPowI = PowIP :: Prim (PowIop Int   )
+dPowI = PowIP :: Prim (PowIop Double)

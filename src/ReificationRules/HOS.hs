@@ -159,6 +159,16 @@ reify _ = error "reify: not implemented"
 
 "reify & rename" forall f. reify f = renameVars (fst (reifyP f))
 
+-- I haven't seen either of these two kick in
+"repr . abst" forall r. repr (abst r) = r
+"abst . repr" forall a. abst (repr a) = a
+
+-- "reify ^" reifyP (^) = constP PowIP
+
+"reify ^ @Int"    reifyP ((^) :: Int    -> Int -> Int   ) = constP PowIP
+"reify ^ @Float"  reifyP ((^) :: Float  -> Int -> Float ) = constP PowIP
+"reify ^ @Double" reifyP ((^) :: Double -> Int -> Double) = constP PowIP
+
  #-}
 
 evalP :: forall a. EP a -> a
