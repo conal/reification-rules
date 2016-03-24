@@ -64,9 +64,9 @@ goSep _ _ _ = error "goSep: not implemented"
 -- goSep name s = go' name [ranksep s]
 {-# NOINLINE goSep #-}
 
--- Use rules instead of INLINE so that we can "inline" these definitions before
--- inlining begins. Otherwise, we'd lose our "primitives" before they can be
--- reified.
+-- Use rules instead of INLINE so that GHC will "inline" these definitions
+-- before inlining begins. Otherwise, we'd lose our "primitives" before they can
+-- be reified.
 
 -- It's crucial that these error definitions are not CAFs. Otherwise, case
 -- alternatives disappear. See inquiry and explanation:

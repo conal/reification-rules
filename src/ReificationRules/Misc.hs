@@ -22,6 +22,7 @@ module ReificationRules.Misc
   , BinRel, (-->)
   , Eq1'(..), (===?)
   , PrimBasics(..), Evalable(..)
+--   , ifThenElse
   ) where
 
 import Unsafe.Coerce (unsafeCoerce)     -- see below
@@ -38,6 +39,10 @@ type BinRel a = a -> a -> Bool
 (f --> h) g = h . g . f
 -- f --> h = \ g x -> h (g (f x))
 {-# INLINE (-->) #-}
+
+-- ifThenElse :: Bool -> Binop a
+-- ifThenElse i t e = if i then t else e
+-- {-# NOINLINE ifThenElse #-}  -- avoid transformation loop
 
 {--------------------------------------------------------------------
     Equality

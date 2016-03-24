@@ -1,11 +1,11 @@
-{-# LANGUAGE CPP, GADTs, KindSignatures, ExplicitForAll, ConstraintKinds, MagicHash, TypeOperators #-}
+{-# LANGUAGE CPP, GADTs, FlexibleContexts, KindSignatures, ExplicitForAll, ConstraintKinds, MagicHash, TypeOperators #-}
 {-# OPTIONS_GHC -Wall #-}
 
 -- Prevent warnings about inlining fst, snd, not, etc.
 -- Might be worthwhile to turn back on and inspect warnings occasionally.
 {-# OPTIONS_GHC -fno-warn-inline-rule-shadowing #-}
 
-#define Testing
+-- #define Testing
 
 -- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
 #ifdef Testing
@@ -27,7 +27,7 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.HOS
-  ( EP,toE,constP,appP,lamP,letP,letPairP,evalP,reifyP,reify, litE
+  ( EP,toE,constP,appP,lamP,letP,letPairP,ifP,evalP,reifyP,reify, litE
   , abst,repr,abst',repr', abstP,reprP
   ) where
 
@@ -37,8 +37,9 @@ import GHC.Types (type (~~),Int(..))  --
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
+import Circat.Misc (Unop,Binop,(:*))
 #ifdef Testing
-import Circat.Misc (Unop,Binop,Ternop,(:*))
+import Circat.Misc (Ternop)
 #endif
 import qualified Circat.Rep as Rep
 import Circat.Rep (HasRep,Rep)
@@ -47,7 +48,7 @@ import Circat.Rep (HasRep,Rep)
 -- import qualified Circat.RTree as R
 -- import qualified Circat.LTree as L
 
-import ReificationRules.Misc (Evalable)
+import ReificationRules.Misc (Evalable,PrimBasics(..))
 import ReificationRules.Exp
 import ReificationRules.Prim
 import ReificationRules.ShowUtils
@@ -67,8 +68,9 @@ type E' p a = (E p a, NameMap)
 toE :: E' p a -> E p a
 toE = fst
 
-app :: E' p (a -> b) -> E' p a -> E' p b
-(f,mf) `app` (x,mx) = (f :^ x, mf `lub` mx)
+infixl 9 ^:
+(^:) :: E' p (a -> b) -> E' p a -> E' p b
+(f,mf) ^: (x,mx) = (f :^ x, mf `lub` mx)
 
 -- Establish a new name based on nm, augmenting name map as needed
 bump :: Unop (Name, NameMap)
@@ -96,10 +98,10 @@ lamPair nma nmb f = (Lam (VarPat (V nma') :$ VarPat (V nmb')) body, mc)
 -- Especially convenient with lamPair. Maybe not, considering the circularity.
 
 letE' :: Name -> E' p a -> (E' p a -> E' p b) -> E' p b
-letE' x a f = lam x f `app` a
+letE' x a f = lam x f ^: a
 
 letPair' :: Name -> Name -> E' p (a :* b) -> (E' p a -> E' p b -> E' p c) -> E' p c
-letPair' x y ab f = lamPair x y f `app` ab
+letPair' x y ab f = lamPair x y f ^: ab
 
 constE' :: p a -> E' p a
 constE' p = (ConstE p, bot)
@@ -109,6 +111,9 @@ reifyE' e = (reifyE e,bot)
 
 evalE' :: (Show' p, HasOpInfo p, Evalable p) => E' p a -> a
 evalE' (e,_) = evalE e
+
+(*#) :: PrimBasics p => E' p a -> E' p b -> E' p (a :* b)
+a *# b = constE' pairP ^: a ^: b
 
 {--------------------------------------------------------------------
     Specializations to Prim
@@ -122,7 +127,7 @@ type EP a = E' Prim a
 type Name# = Addr#
 
 appP :: forall a b. EP (a -> b) -> EP a -> EP b
-appP = app
+appP = (^:)
 {-# NOINLINE appP #-}
 
 lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
@@ -168,6 +173,10 @@ constP = constE'
 
 -- The NOINLINEs are just to reduce noise when examining Core output.
 -- Remove them later.
+
+ifP :: CircuitIf a => EP Bool -> Binop (EP a)
+ifP i t e = constP IfP ^: (i *# (t *# e))
+{-# NOINLINE ifP #-}
 
 {--------------------------------------------------------------------
     HasRep
@@ -217,10 +226,10 @@ litE = constP . LitP . toLit
 --------------------------------------------------------------------}
 
 app1 :: p (a -> b) -> E' p a -> E' p b
-app1 p = app (constE' p)
+app1 p = (constE' p ^:)
 
 app2 :: p (a -> b -> c) -> E' p a -> E' p b -> E' p c
-app2 f a b = app (app1 f a) b
+app2 f a b = app1 f a ^: b
 
 twice :: Unop (Unop a)
 twice f = f . f

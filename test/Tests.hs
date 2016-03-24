@@ -1,4 +1,4 @@
-{-# language CPP, LambdaCase, GADTs, TypeOperators, DataKinds #-}
+{-# LANGUAGE CPP, LambdaCase, GADTs, TypeOperators, DataKinds, TypeApplications #-}
 
 {-# OPTIONS_GHC -Wall -fno-warn-unticked-promoted-constructors -fno-warn-missing-signatures #-}
 
@@ -41,6 +41,7 @@ import ShapedTypes.Pair
 import ShapedTypes.Vec
 import qualified ShapedTypes.RPow as R
 import qualified ShapedTypes.LPow as L
+import ShapedTypes.Sized
 import ShapedTypes.Linear
 import ShapedTypes.Scan
 import ShapedTypes.FFT
@@ -107,6 +108,10 @@ main = go "foo" t
 
 -- t (p :: (Int,Bool)) = (snd p, fst p)
 
+-- t x = if x then 2 else 1 :: Int
+
+-- t x = if x then (2,False) else (1 :: Int,True)
+
 -- t = (5,6) :: (Int,Int)
 
 -- t = repr (2 :# 3 :: Pair Int)
@@ -155,7 +160,7 @@ main = go "foo" t
 
 -- t = mappend :: Binop (Sum Int)
 
-t = sum :: RTree N6 Int -> Int
+-- t = sum :: RTree N6 Int -> Int
 
 -- t = transpose :: Unop (Pair (Pair Bool))
 
@@ -193,11 +198,18 @@ t = sum :: RTree N6 Int -> Int
 
 -- t = fft :: LTree N3 C -> RTree N3 C
 
--- t = fft :: RTree N4 C -> LTree N4 C
+-- t = fft :: RTree N2 C -> LTree N2 C
+
+-- -- StateL casts
+-- t = lsums :: Vec N12 Int -> (Vec N12 Int, Int)
+
+-- t = size @Pair
 
 {--------------------------------------------------------------------
     In progress
 --------------------------------------------------------------------}
+
+t = size @(Vec N3)
 
 -- t = fft :: Unop (Vec N3 C)
 
@@ -205,8 +217,7 @@ t = sum :: RTree N6 Int -> Int
     Broken
 --------------------------------------------------------------------}
 
--- -- StateL casts
--- t = lsums :: Vec N4 Int -> (Vec N4 Int, Int)
+-- t = mappend :: Binop Any
 
 {--------------------------------------------------------------------
     Helpers

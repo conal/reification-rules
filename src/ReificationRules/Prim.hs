@@ -29,7 +29,7 @@ module ReificationRules.Prim
   -- , primArrow
   -- Convenient constraint aliases
   , CircuitEq, CircuitOrd, CircuitBot, CircuitNum
-  , CircuitFloating, CircuitFractional, CircuitFromIntegral
+  , CircuitFloating, CircuitFractional, CircuitFromIntegral, CircuitIf
   ) where
 
 -- #define LitSources
@@ -158,6 +158,7 @@ type CircuitNum          = NumCat          (:>)
 type CircuitFractional   = FractionalCat   (:>)
 type CircuitFloating     = FloatingCat     (:>)
 type CircuitFromIntegral = FromIntegralCat (:>)
+type CircuitIf           = IfCat           (:>)
 
 -- NOTE: When adding a constraint alias to the list above, be sure to export so
 -- reifyStdMeth can find it.
@@ -180,7 +181,7 @@ data Prim :: * -> * where
   InlP             :: Prim (a -> a :+ b)
   InrP             :: Prim (b -> a :+ b)
   PairP            :: Prim (a -> b -> a :* b)
-  IfP              :: IfCat (:>) a => Prim (Bool :* (a :* a) -> a)
+  IfP              :: CircuitIf a => Prim (Bool :* (a :* a) -> a)
   AbstP            :: HasRep a => Prim (Rep a -> a)
   ReprP            :: HasRep a => Prim (a -> Rep a)
   BottomP          :: BottomCat (:>) a => Prim a

@@ -18,3 +18,4 @@ The code contains several "`TODO`" comments, some of which are also listed below
 *   Simplify *after* reifying.
     Since inlining and case-removal will have happened, I think results will improve.
     If so, do less during reification (including some `let`-avoidance).
+*   Eliminate `MonoPrims` in favor of building dictionaries on the fly.

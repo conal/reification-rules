@@ -75,9 +75,12 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , idV        :: Id
                          , composeV   :: Id
                          , prePostV   :: Id
+                         , ifPV       :: Id
+                         , ifCatTy    :: Type -> Type
                          , hasRepMeth :: HasRepMeth
                          , hasLit     :: HasLit
                          , tracing    :: Bool
+                         , hsc_env    :: HscEnv
                          }
 
 -- TODO: Perhaps drop reifyV, since it's in the rule
@@ -148,6 +151,16 @@ reify (ReifyEnv {..}) guts dflags inScope =
           tryReify (Case scrut' wild ty alts)
      Trying("case-of-case")
      e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
+     Trying("if-then-else")
+     e@(Case scrut wild rhsTy [ (DataAlt false, [], falseVal)
+                              , (DataAlt true , [],  trueVal) ])
+       | false == falseDataCon, true == trueDataCon ->
+         if isDeadBinder wild then
+           (varApps ifPV [rhsTy] . (buildDict (ifCatTy rhsTy) :))
+             <$> mapM tryReify [scrut,trueVal,falseVal]
+         else
+           pprPanic "reify - case with live wild var (not yet handled)" (ppr e)
+           -- TODO: handle live wild var.
      Trying("unit scrutinee")
      e@(Case _scrut wild _rhsTy [(DataAlt dc, [], rhs)])
          | isBoxedTupleTyCon (dataConTyCon dc)
@@ -221,7 +234,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
              , Just reV <- tryReify v
        ->
         Just (varApps appV [dom,ran] [reU,reV])
-     _e -> -- pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
+     _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
    -- v --> ("v'", eval v')
@@ -324,6 +337,9 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- onInlineFail v =
    --   pprTrace "onInlineFail idDetails" (ppr v <+> colon <+> ppr (idDetails v))
    --   Nothing
+   buildDict :: Type -> CoreExpr
+   buildDict ty = fromMaybe (pprPanic "reify - couldn't build dictionary for" (ppr ty)) $
+                  buildDictionary hsc_env dflags guts inScope ty
    -- Tracing
    dtrace :: String -> SDoc -> a -> a
    dtrace str doc | tracing   = pprTrace str doc
@@ -486,7 +502,7 @@ stdMethMap = M.fromList $
   ++
   [ ("not","notP"), ("||","orP"), ("&&","andP")
   , ("fst","exlP"), ("snd","exrP"), ("(,)","pairP")
-  ]
+  , ("ifThenElse","ifP")]
  where
    -- Unqualified method name, e.g., "$fNumInt_$c+".
    -- Eq & Ord for Int use "eqInt" etc.
@@ -551,6 +567,7 @@ mkReifyEnv opts = do
   lamV     <- findExpId "lamP"
   letV     <- findExpId "letP"
   letPairV <- findExpId "letPairP"
+  ifPV     <- findExpId "ifP"
   reifyV   <- findExpId "reifyP"
   evalV    <- findExpId "evalP"
   constV   <- findExpId "constP"
@@ -574,8 +591,14 @@ mkReifyEnv opts = do
   toLitV     <- findExpId "litE"
   hasLitTc   <- findTc "ReificationRules.Prim" "HasLit"
   hasLit     <- toLitM hasLitTc toLitV
-  let tracing    = "trace" `elem` opts
+  circuitTc  <- findTc "Circat.Circuit" ":>"
+  ifCatTc    <- findTc "Circat.Classes" "IfCat"
+  let circuitTy = mkTyConApp circuitTc []
+      ifCatTy t = mkTyConApp ifCatTc [circuitTy,t]
+      tracing   = "trace" `elem` opts
   return (ReifyEnv { .. })
+
+--   primTc     <- findTc "ReificationRules.Prim" "Prim"
 
       -- findDc = lookupTh mkDataOcc lookupDataCon
       -- findPrimDc = findDc "ReificationRules.Prim"
@@ -617,8 +640,8 @@ hasRepMethodM hasRepTc repTc idV =
                     dict = conApps hasRepDc [ty] [repr,abst]
                 return (dict,(repNtIs,ty'))
 #endif
-           findDict :: Maybe (CoreExpr,(Coercion,Type))
-           findDict =
+           findRep :: Maybe (CoreExpr,(Coercion,Type))
+           findRep =
              (, normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
                   Nominal (mkTyConApp repTc [ty]) )
              <$> buildDictionary hscEnv dflags guts inScope
@@ -628,7 +651,8 @@ hasRepMethodM hasRepTc repTc idV =
              \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
                        varApps meth [ty,ty'] [dict,mkEqBox co]
        in
-          mkMethApp <$> (newtypeRep <|> findDict)
+          -- Real dictionary or synthesize
+          mkMethApp <$> (findRep <|> newtypeRep)
 
 -- <Sum a>_R -> Data.Monoid.N:Sum[0]
 --               (Sub (Sym (Circat.Rep.D:R:RepSum[0] <a>_N)))

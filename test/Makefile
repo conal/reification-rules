@@ -50,8 +50,8 @@ GhcFlags += -fsimpl-tick-factor=200
 # Specialization blows up transpose code exponentially. Revisit when we reify partially.
 GhcFlags += -fno-specialise
 
-# # Trace reification
-# GhcFlags += -fplugin-opt=$(plugin):trace
+# Trace reification
+GhcFlags += -fplugin-opt=$(plugin):trace
 
 compile=time $(ghc) -O -fplugin=$(plugin) $(GhcFlags)
 
