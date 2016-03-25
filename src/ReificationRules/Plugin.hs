@@ -488,7 +488,7 @@ badTyConApp _                                = False
 badTyCon :: TyCon -> Bool
 -- badTyCon tc | pprTrace "badTyCon" (ppr tc) False = undefined
 badTyCon tc = qualifiedName (tyConName tc) `elem`
-  [ "GHC.Integer.Type"
+  [ "GHC.Integer.Type.Integer"
   , "GHC.Types.[]"
   , "GHC.Types.IO"
   , "ReificationRules.Exp.E"            -- TODO: Fix for HOS or okay?
@@ -575,10 +575,11 @@ install opts todos =
      -- TODO: add "reify_" bindings and maybe rules.
      let addRule guts = pure (on_mg_rules (rr guts :) guts)
      return $   CoreDoPluginPass "Reify insert rule" addRule
-              : CoreDoSimplify 2 mode
+              : CoreDoSimplify 1 mode
               : todos
  where
-   -- 
+   -- Extra simplifier pass for reification.
+   -- Rules on, no inlining, and case-of-case.
    mode = SimplMode { sm_names      = ["Reify simplifier pass"]
                     , sm_phase      = InitialPhase
                     , sm_rules      = True  -- important
