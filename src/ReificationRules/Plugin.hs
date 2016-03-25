@@ -27,6 +27,7 @@
 
 module ReificationRules.Plugin (plugin) where
 
+import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard)
 import Data.Maybe (fromMaybe,isJust)
@@ -44,7 +45,7 @@ import DynamicLoading
 import MkId (mkDictSelRhs)
 import Pair (Pair(..))
 import Type (coreView)
--- import TcType (isIntegerTy)
+import TcType (isIntTy, isDoubleTy)
 import FamInstEnv (normaliseType)
 -- import TcType (isIntTy)
 import TyCoRep                          -- TODO: explicit imports
@@ -66,7 +67,7 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , reifyV     :: Id
                          , evalV      :: Id
                          , primFun    :: PrimFun
-                         , isPrim     :: Id -> Bool
+                         , isPrimApp  :: CoreExpr -> Bool
                          , abstV      :: Id
                          , reprV      :: Id
                          , abst'V     :: Id
@@ -234,13 +235,12 @@ reify (ReifyEnv {..}) guts dflags inScope =
                  meth abstV `App` (simplE True (meth repr'V `App` body))
      Trying("primitive")
      -- Primitive functions
-     e@(collectTyArgs -> (Var v, tys))
+     e@(collectTysDictsArgs -> (Var v, tys, _dicts))
        | j@(Just _) <- primFun (exprType e) v tys -> j
      -- reify (eval e) --> e.
      Trying("eval")
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      Trying("unfold")
-     -- Restrict to no regular arguments
      (unfoldMaybe -> Just e') -> tryReify e'
      -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
@@ -295,8 +295,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
    cheap :: CoreExpr -> Bool
    -- cheap e | pprTrace "cheap?" (ppr e) False = undefined
    cheap e | isTyCoDictArg e = True
-   cheap (Var v)             = not (isPrim v) &&
-                               maybe True cheap (inlineMaybe v)
+           | isPrimApp e     = False
+   cheap (Var v)             = maybe True cheap (inlineMaybe v)
    cheap (Lit _)             = True
    cheap (Lam _ body)        = cheap body
    cheap (App u v)           = cheap u && cheap v  -- Watch out
@@ -350,11 +350,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
    unfolded e = fromMaybe e (unfoldMaybe e)               
    -- Unfold application head, if possible.
    unfoldMaybe :: ReExpr
-   unfoldMaybe = -- traceRewrite "unfold" $
-                 onAppsFun inlineMaybe
+   unfoldMaybe e = -- traceRewrite "unfoldMaybe" $
+                   guard (not (isPrimApp e)) >>
+                   onAppsFun inlineMaybe e
    inlineMaybe :: Id -> Maybe CoreExpr
-   inlineMaybe v = guard (not (isPrim v)) >>
-                   (inlineId <+ -- onInlineFail <+ traceRewrite "inlineClassOp"
+   inlineMaybe v = (inlineId <+ -- onInlineFail <+ traceRewrite "inlineClassOp"
                                 inlineClassOp) v
    -- onInlineFail :: Id -> Maybe CoreExpr
    -- onInlineFail v =
@@ -441,6 +441,16 @@ varApps = apps . Var
 conApps :: DataCon -> [Type] -> [CoreExpr] -> CoreExpr
 conApps = varApps . dataConWorkId
 
+-- Split into Var head, type arguments, and other arguments (breaking at first
+-- non-type).
+unVarApps :: CoreExpr -> Maybe (Id,[Type],[CoreExpr])
+unVarApps (collectArgs -> (Var v,allArgs)) = Just (v,tys,others)
+ where
+   (tys,others) = first (map unType) (span isTypeArg allArgs)
+   unType (Type t) = t
+   unType e        = pprPanic "unVarApps - unType" (ppr e)
+unVarApps _ = Nothing
+
 -- reifiableKind :: Kind -> Bool
 -- reifiableKind = isLiftedTypeKind
 
@@ -496,6 +506,15 @@ reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
     Primitive translation
 --------------------------------------------------------------------}
 
+#if 0
+-- Generate code for MonoPrims
+monoPrimDefs :: String
+monoPrimDefs = unlines
+  [ printf "%-7s = %6sP :: Prim (%-6s %-6s)" pat prim tyOp ty
+  | (_cls,tyOp,tys,ps) <- stdClassOpInfo, ty <- tys
+  , (_op,prim) <- ps, let pat = primAt prim ty ]
+#endif
+
 stdClassOpInfo :: [(String,String,[String],[(String,String)])]
 stdClassOpInfo =
    [ ( "Eq","BinRel",["Bool","Int","Double"]
@@ -506,8 +525,8 @@ stdClassOpInfo =
      , [("negate","Negate")])
    , ( "Num","Binop",["Int","Double"]
      , [("+","Add"),("-","Sub"),("*","Mul")])
---    , ( "","PowIop",["Int","Double"]
---      , [("^","PowI")])
+   , ( "Bogus","PowIop",["Int","Double"]
+     , [("^","PowI")])
    , ( "Floating","Unop",["Double"]
      , [("exp","Exp"),("cos","Cos"),("sin","Sin")])
    , ( "Fractional","Unop",["Double"]
@@ -537,7 +556,6 @@ stdMethMap = M.fromList $
    opName :: String -> String -> String -> String -> String
    opName cls ty op prim
      | ty == "Int" && cls `elem` ["Eq","Ord"] = onHead toLower prim ++ "Int"
---      | op `elem` ["^"]                        = op
      | otherwise                              = printf "$f%s%s_$c%s" cls ty op
 
 -- If I give up on using a rewrite rule, then I can precede the first simplifier
@@ -623,10 +641,15 @@ mkReifyEnv opts = do
   composeV <- findBaseId "."
   prePostV <- findMiscId "-->"
   primMap  <- mapM findMonoId stdMethMap
-  let lookupPrim v = M.lookup (uqVarName v) primMap
-      primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys []])
-                         <$> lookupPrim v
-      isPrim = isJust . lookupPrim
+  let lookupPrim v tys = M.lookup (tweak (uqVarName v) tys) primMap
+      primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId []{-tys-} []])
+                         <$> lookupPrim v tys
+      isPrimApp (unVarApps -> Just (v,tys,_)) = isJust (lookupPrim v tys)
+      isPrimApp _ = False
+      -- tweak nm ts | pprTrace "mkReifyEnv / tweak" (text nm <+> ppr ts) False = undefined
+      tweak "^" [a,isIntTy -> True] | isIntTy    a = "$fBogusInt_$c^"
+                                    | isDoubleTy a = "$fBogusDouble_$c^"
+      tweak nm _ = nm
   hasRepTc   <- findRepTc "HasRep"
   repTc      <- findRepTc "Rep"
   hasRepMeth <- hasRepMethodM hasRepTc repTc idV
@@ -743,7 +766,7 @@ toLitM hasLitTc toLitV =
    isLiteral (collectArgs -> (Var v, _)) =
      isJust (isDataConId_maybe v) ||
      uqVarName v `elem`
-       ["$fNumInt_$cfromInteger", "$fNumDouble_$cfromInteger", "int2Double"]
+       ["$fNumInt_$cfromInteger", "$fNumDouble_$cfromInteger"] -- , "int2Double"
    isLiteral _ = False
 
 -- TODO: check args in isLiteral to make sure that they don't need reifying.
@@ -793,6 +816,13 @@ collectTyArgs = go []
  where
    go tys (App e (Type ty)) = go (ty:tys) e
    go tys e                 = (e,tys)
+
+collectTysDictsArgs :: CoreExpr -> (CoreExpr,[Type],[CoreExpr])
+collectTysDictsArgs e = (h,tys,dicts)
+ where
+   (e',dicts) = collectArgsPred isPred e
+   (h,tys)    = collectTyArgs e'
+   isPred ex  = not (isTyCoArg ex) && isPredTy (exprType ex)
 
 collectArgsPred :: (CoreExpr -> Bool) -> CoreExpr -> (CoreExpr,[CoreExpr])
 collectArgsPred p = go []
