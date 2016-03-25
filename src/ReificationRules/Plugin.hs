@@ -481,6 +481,7 @@ badTyConArg _                                 = False
 badTyConApp :: Type -> Bool
 -- badTyConApp ty | pprTrace "badTyConApp" (ppr ty) False = undefined
 badTyConApp (coreView -> Just ty)            = badTyConApp ty
+-- badTyConApp (isIntegerTy -> True)            = True  -- or in badTycon
 badTyConApp (tyConAppTyCon_maybe -> Just tc) = badTyCon tc
 badTyConApp _                                = False
 -- TODO: rename
@@ -488,8 +489,8 @@ badTyConApp _                                = False
 badTyCon :: TyCon -> Bool
 -- badTyCon tc | pprTrace "badTyCon" (ppr tc) False = undefined
 badTyCon tc = qualifiedName (tyConName tc) `elem`
-  [ "GHC.Integer.Type.Integer"
-  , "GHC.Types.[]"
+  [ "GHC.Types.[]"
+  , "GHC.Integer.Type.Integer"          -- or use isIntegerTy in badTyConApp
   , "GHC.Types.IO"
   , "ReificationRules.Exp.E"            -- TODO: Fix for HOS or okay?
   ]
