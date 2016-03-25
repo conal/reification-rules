@@ -46,6 +46,7 @@ import Pair (Pair(..))
 import Type (coreView)
 -- import TcType (isIntegerTy)
 import FamInstEnv (normaliseType)
+-- import TcType (isIntTy)
 import TyCoRep                          -- TODO: explicit imports
 
 import ReificationRules.Misc (Unop,Binop)
@@ -72,6 +73,7 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , repr'V     :: Id
                          , abstPV     :: Id
                          , reprPV     :: Id
+                         , unIV       :: Id
                          , idV        :: Id
                          , composeV   :: Id
                          , prePostV   :: Id
@@ -149,8 +151,12 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Case (Cast e co) wild ty alts ->
        do scrut' <- (`App` e) <$> recast co
           tryReify (Case scrut' wild ty alts)
+#if 1
      Trying("case-of-case")
-     e@(Case (Case {}) _ _ _) -> tryReify (simplE False e) -- still necessary?
+     -- Give the simplifier another shot
+     _e@(Case (Case {}) _ _ _) -> -- Nothing
+                                  tryReify (simplE False _e) -- still necessary?
+#endif
      Trying("if-then-else")
      e@(Case scrut wild rhsTy [ (DataAlt false, [], falseVal)
                               , (DataAlt true , [],  trueVal) ])
@@ -186,6 +192,22 @@ reify (ReifyEnv {..}) guts dflags inScope =
       where
         (a',strA,evalA) = mkVarEvald a
         (b',strB,evalB) = mkVarEvald b
+#if 0
+     -- I'm still noodling over this one. As is, unI# gets inlined, leading to
+     -- the same sort of scrutinee.
+     Trying("Int scrutinee")
+     --  (case scrut of I# n -> RHS) --> (let { w = scrut; n = unI# w } in RHS)
+     Case scrut w _rhsTy [(DataAlt _dc, [n], rhs)]
+         | isIntTy (varType w')
+         , reifiableExpr rhs ->
+       tryReify $
+         mkCoreLet (NonRec n (App (Var unIV) scrut)) rhs
+--          mkCoreLets [ (NonRec w' scrut)
+--                     , (NonRec n ({-mkCoreApp (text "reify") -} App (Var unIV) (Var w'))) ]
+--            rhs
+      where
+        w' = zapIdOccInfo w
+#endif
      Trying("abstReprCase")
      Case scrut v altsTy alts
        | not (alreadyAbstReprd scrut)
@@ -219,7 +241,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      Trying("unfold")
      -- Restrict to no regular arguments
-     (unfoldTyCoDictMaybe -> Just e') -> tryReify e'
+     (unfoldTyCoDictMaybe{-unfoldMaybe-} -> Just e') -> tryReify e'
      -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
      Trying("case-apps")
@@ -509,8 +531,10 @@ stdMethMap = M.fromList $
   [ (opName cls ty op prim, primAt prim ty)
   | (cls,_,tys,ps) <- stdClassOpInfo, ty <- tys, (op,prim) <- ps ]
   ++
-  [ ("not","notP"), ("||","orP"), ("&&","andP")
-  , ("fst","exlP"), ("snd","exrP"), ("(,)","pairP")
+  [ ("fst","exlP"), ("snd","exrP"), ("(,)","pairP")
+  -- Experiment: let these boolean operations inline,
+  -- and rediscover them in circuit optimization.
+  -- , ("not","notP"), ("||","orP"), ("&&","andP")
   , ("ifThenElse","ifP")]
  where
    -- Unqualified method name, e.g., "$fNumInt_$c+".
@@ -587,6 +611,7 @@ mkReifyEnv opts = do
   repr'V   <- findExpId "repr'"
   abstPV   <- findExpId "abstP"
   reprPV   <- findExpId "reprP"
+  unIV     <- findExpId "unI#"
   idV      <- findBaseId "id"
   composeV <- findBaseId "."
   prePostV <- findMiscId "-->"
