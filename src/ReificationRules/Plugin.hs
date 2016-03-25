@@ -241,7 +241,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      Trying("unfold")
      -- Restrict to no regular arguments
-     (unfoldTyCoDictMaybe{-unfoldMaybe-} -> Just e') -> tryReify e'
+     (unfoldMaybe -> Just e') -> tryReify e'
      -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
      Trying("case-apps")
@@ -348,12 +348,6 @@ reify (ReifyEnv {..}) guts dflags inScope =
 
    unfolded :: Unop CoreExpr
    unfolded e = fromMaybe e (unfoldMaybe e)               
-   -- Unfold for a var applied only to type, coercion, and dictionary arguments.
-   -- TODO: Refactor utilities to make this sort of thing simple & efficient
-   unfoldTyCoDictMaybe :: ReExpr
-   unfoldTyCoDictMaybe e
-     | (Var _, _args) <- collectTyCoDictArgs e = unfoldMaybe e
-     | otherwise                               = Nothing
    -- Unfold application head, if possible.
    unfoldMaybe :: ReExpr
    unfoldMaybe = -- traceRewrite "unfold" $
@@ -748,7 +742,8 @@ toLitM hasLitTc toLitV =
  where
    isLiteral (collectArgs -> (Var v, _)) =
      isJust (isDataConId_maybe v) ||
-     fqVarName v == "GHC.Num.$fNumInt_$cfromInteger"
+     uqVarName v `elem`
+       ["$fNumInt_$cfromInteger", "$fNumDouble_$cfromInteger", "int2Double"]
    isLiteral _ = False
 
 -- TODO: check args in isLiteral to make sure that they don't need reifying.
@@ -764,8 +759,8 @@ toLitM hasLitTc toLitV =
 on_mg_rules :: Unop [CoreRule] -> Unop ModGuts
 on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
 
-fqVarName :: Var -> String
-fqVarName = qualifiedName . varName
+-- fqVarName :: Var -> String
+-- fqVarName = qualifiedName . varName
 
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
