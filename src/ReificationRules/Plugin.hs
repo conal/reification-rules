@@ -731,14 +731,13 @@ hasRepMethodM hasRepTc repTc idV =
 --   ?callStack::GHC.Stack.Types.CallStack => TCvSubst -> Type -> Type
 --   	-- Defined in ‘TyCoRep’
 
-
 type HasLit = DynFlags -> ModGuts -> InScopeEnv -> ReExpr
 
 toLitM :: TyCon -> Id -> CoreM HasLit
 toLitM hasLitTc toLitV =
   do hscEnv <- getHscEnv
      return $ \ dflags guts inScope e ->
-       guard (isConApp e) >>            -- TODO: expand is-literal test
+       guard (isLiteral e) >>
        let ty = exprType e
            lfun :: CoreExpr -> CoreExpr
            lfun dict = -- dtrace "toLit" (ppr e) $
@@ -746,6 +745,13 @@ toLitM hasLitTc toLitV =
        in
          lfun <$> buildDictionary hscEnv dflags guts inScope
                     (mkTyConApp hasLitTc [ty])
+ where
+   isLiteral (collectArgs -> (Var v, _)) =
+     isJust (isDataConId_maybe v) ||
+     fqVarName v == "GHC.Num.$fNumInt_$cfromInteger"
+   isLiteral _ = False
+
+-- TODO: check args in isLiteral to make sure that they don't need reifying.
 
 -- TODO: move the CoreM stuff in hasRepMethodM and toLitM into calling code.
 
@@ -758,8 +764,8 @@ toLitM hasLitTc toLitV =
 on_mg_rules :: Unop [CoreRule] -> Unop ModGuts
 on_mg_rules f mg = mg { mg_rules = f (mg_rules mg) }
 
--- fqVarName :: Var -> String
--- fqVarName = qualifiedName . varName
+fqVarName :: Var -> String
+fqVarName = qualifiedName . varName
 
 uqVarName :: Var -> String
 uqVarName = getOccString . varName
@@ -805,9 +811,9 @@ collectTyCoDictArgs = collectArgsPred isTyCoDictArg
 isTyCoDictArg :: CoreExpr -> Bool
 isTyCoDictArg e = isTyCoArg e || isPredTy (exprType e)
 
-isConApp :: CoreExpr -> Bool
-isConApp (collectArgs -> (Var (isDataConId_maybe -> Just _), _)) = True
-isConApp _ = False
+-- isConApp :: CoreExpr -> Bool
+-- isConApp (collectArgs -> (Var (isDataConId_maybe -> Just _), _)) = True
+-- isConApp _ = False
 
 -- TODO: More efficient isConApp, discarding args early.
 
