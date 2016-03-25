@@ -151,7 +151,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Case (Cast e co) wild ty alts ->
        do scrut' <- (`App` e) <$> recast co
           tryReify (Case scrut' wild ty alts)
-#if 1
+#if 0
      Trying("case-of-case")
      -- Give the simplifier another shot
      _e@(Case (Case {}) _ _ _) -> -- Nothing
@@ -573,8 +573,19 @@ install opts todos =
      rr <- mkReifyRule opts
      -- For now, just insert the rule.
      -- TODO: add "reify_" bindings and maybe rules.
-     let pass guts = pure (on_mg_rules (rr guts :) guts)
-     return $ CoreDoPluginPass "Reify insert rule" pass : todos
+     let addRule guts = pure (on_mg_rules (rr guts :) guts)
+     return $   CoreDoPluginPass "Reify insert rule" addRule
+              : CoreDoSimplify 2 mode
+              : todos
+ where
+   -- 
+   mode = SimplMode { sm_names      = ["Reify simplifier pass"]
+                    , sm_phase      = InitialPhase
+                    , sm_rules      = True  -- important
+                    , sm_inline     = False -- important
+                    , sm_eta_expand = False -- ??
+                    , sm_case_case  = True  -- important
+                    }
 
 type PrimFun = Type -> Id -> [Type] -> Maybe CoreExpr
 
