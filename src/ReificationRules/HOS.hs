@@ -1,6 +1,8 @@
 {-# LANGUAGE CPP, GADTs, FlexibleContexts, KindSignatures, ExplicitForAll, ConstraintKinds, MagicHash, TypeOperators #-}
 {-# OPTIONS_GHC -Wall #-}
 
+{-# OPTIONS_GHC -Wno-orphans #-} -- See orphans below
+
 -- Prevent warnings about inlining fst, snd, not, etc.
 -- Might be worthwhile to turn back on and inspect warnings occasionally.
 {-# OPTIONS_GHC -fno-warn-inline-rule-shadowing #-}
@@ -168,9 +170,31 @@ reify _ = error "reify: not implemented"
 
 -- "reify ^" reifyP (^) = constP PowIP
 
-"reify ^ @Int"    reifyP ((^) :: Int    -> Int -> Int   ) = constP PowIP
-"reify ^ @Float"  reifyP ((^) :: Float  -> Int -> Float ) = constP PowIP
-"reify ^ @Double" reifyP ((^) :: Double -> Int -> Double) = constP PowIP
+-- I've replaced these rules with explicit code in Plugin. Keep the commented
+-- form around in case I want to revert when I have more polymorphic primitives.
+
+-- "reify ^ @Int"    reifyP ((^) :: Int    -> Int -> Int   ) = constP PowIP
+-- "reify ^ @Float"  reifyP ((^) :: Float  -> Int -> Float ) = constP PowIP
+-- "reify ^ @Double" reifyP ((^) :: Double -> Int -> Double) = constP PowIP
+
+-- Competitors to the rules in GHC.Reals using balanced multiplication trees to
+-- help parallelism. If/when I rebalance associative operations elsewhere, drop
+-- these rules. Luckily, these orphan rules (-Wno-orphans) win over the rules in
+-- GHC.Reals.
+
+-- "^4/Int balanced" forall a. a ^ (4 :: Int) = let b = a*a in b*b
+-- "^5/Int balanced" forall a. a ^ (5 :: Int) = let b = a*a in b*b*a
+-- "^6/Int balanced" forall a. a ^ (6 :: Int) = let b = a*a in b*b*b
+-- "^8/Int balanced" forall a. a ^ (8 :: Int) = let b = a*a in let c = b*b in c*c
+
+-- I added rules for 6 and 8, because they cost the same as 5.
+
+-- Use explicit powers instead:
+
+"^4/Int balanced" forall a. a ^ (4 :: Int) = (a ^ (2::Int)) ^ (2::Int)
+"^5/Int balanced" forall a. a ^ (5 :: Int) = (a ^ (4::Int)) * a
+"^6/Int balanced" forall a. a ^ (6 :: Int) = (a ^ (3::Int)) ^ (2::Int)
+"^8/Int balanced" forall a. a ^ (8 :: Int) = (a ^ (4::Int)) ^ (2::Int)
 
  #-}
 
