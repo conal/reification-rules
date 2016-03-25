@@ -29,6 +29,8 @@
 module ReificationRules.HOS
   ( EP,toE,constP,appP,lamP,letP,letPairP,ifP,evalP,reifyP,reify, litE
   , abst,repr,abst',repr', abstP,reprP
+  , unI#
+  , succI
   ) where
 
 import Data.Map
@@ -53,7 +55,8 @@ import ReificationRules.Exp
 import ReificationRules.Prim
 import ReificationRules.ShowUtils
 
--- TODO: Drastically trim LambdaCCC.Lambda. See NewLambda for a start.
+-- Reboxing experiment
+import GHC.Exts (Int#)
 
 type NameMap = Map Name Int
 
@@ -188,6 +191,23 @@ ifP :: CircuitIf a => EP Bool -> Binop (EP a)
 ifP i t e = constP IfP ^: (i *# (t *# e))
 {-# NOINLINE ifP #-}
 
+-- Reboxing experiment
+
+unI# :: Int -> Int#
+unI# (I# i) = i
+{-# NOINLINE unI# #-}
+
+{-# RULES
+
+-- "rebox Int" forall n. I# (unI# n) = n
+
+--     RULE left-hand side too complicated to desugar
+--       Optimised lhs: case unI# n of wild_00 { __DEFAULT ->
+--                      GHC.Types.I# wild_00
+--                      }
+
+ #-}
+
 {--------------------------------------------------------------------
     HasRep
 --------------------------------------------------------------------}
@@ -279,3 +299,7 @@ t7 = lam "x" $ \ x -> lam "x" $ \ y -> lam "x" $ \ z -> orOf x (notOf (orOf y z)
 -- (\ x2 -> \ x1 -> \ x -> x2 || not (x1 || x),fromList [("x",3)])
 
 #endif
+
+succI :: Int -> Int
+succI x = x + 1
+
