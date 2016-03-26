@@ -100,16 +100,25 @@ buildDictionary' env dflags guts evar =
 
 buildDictionary :: HscEnv -> DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe CoreExpr
 buildDictionary env dflags guts inScope ty =
-  do guard (notNull bnds)
-     return $
-       case bnds of
-         -- The common case that we would have gotten a single non-recursive let
-         [NonRec v e] | i == v -> e
-         _                     -> mkCoreLets bnds (varToCoreExpr i)
+  do 
+     -- pprTrace "buildDictionary" (ppr ty <+> text "-->" <+> ppr dict) (return ())
+     guard (notNull bnds && isEmptyVarSet freeIds)
+     return dict
  where
    binder   = localId inScope
                 ("$d" ++ zEncodeString (filter (not . isSpace) (showPpr dflags ty))) ty
    (i,bnds) = buildDictionary' env dflags guts binder
+   dict =
+     case bnds of
+       -- The common case that we would have gotten a single non-recursive let
+       [NonRec v e] | i == v -> e
+       _                     -> mkCoreLets bnds (varToCoreExpr i)
+   -- Sometimes buildDictionary' constructs bogus dictionaries with free
+   -- identifiers. Hence check that freeIds is empty. Allow for free *type*
+   -- variables, however, since there may be some in the given type as
+   -- parameters. Alternatively, check that there are no free variables (val or
+   -- type) in the resulting dictionary that were not in the original type.
+   freeIds = filterVarSet isId (exprFreeVars dict)
 
 -- | Make a unique identifier for a specified type, using a provided name.
 localId :: InScopeEnv -> String -> Type -> Id
