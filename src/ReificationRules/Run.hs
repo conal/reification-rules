@@ -22,7 +22,7 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.Run
-  ( Okay, go,go',goSep,run,runSep,goM,goM',goMSep
+  ( Okay, go,go',goSep,run,runSep,goM,goM',goMSep, ranksep
   ) where
 
 -- TODO: clean up interfaces.
