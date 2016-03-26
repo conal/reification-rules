@@ -219,10 +219,10 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Case scrut v altsTy alts
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
+     Trying("recast")
+     Cast e (recast -> Just f) -> tryReify (App f e)
      Trying("unfold castee")
      Cast (unfoldMaybe -> Just e') co -> tryReify $ Cast e' co
-     Trying("cast")
-     Cast e (recast -> Just f) -> tryReify (App f e)
      Trying("repMeth")
      (repMeth -> Just e) -> Just e
      Trying("literal")
@@ -342,7 +342,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    recast (SubCo co) = recast co
    -- Panic for now, to reduce output.
    -- Maybe stick with the panic, and drop the Maybe.
-   recast co = pprPanic "recast: unhandled coercion" (ppr co)
+   recast co = pprPanic "recast: unhandled coercion" (ppr co <+> dcolon <+> ppr (coercionType co))
    -- recast co = dtrace "recast: unhandled coercion" (ppr co) Nothing
    recastRep v get co = ($ v) <$> hrMeth (get (coercionKind co))
    -- TODO: Check the type, in case the coercion is not
@@ -350,11 +350,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
 
    unfolded :: Unop CoreExpr
    unfolded e = fromMaybe e (unfoldMaybe e)               
-   -- Unfold application head, if possible.
+   -- Inline in applications (function part) and casts.
    unfoldMaybe :: ReExpr
    unfoldMaybe e = -- traceRewrite "unfoldMaybe" $
                    guard (not (isPrimApp e)) >>
-                   onAppsFun inlineMaybe e
+                   onExprHead inlineMaybe e
    inlineMaybe :: Id -> Maybe CoreExpr
    inlineMaybe v = (inlineId <+ -- onInlineFail <+ traceRewrite "inlineClassOp"
                                 inlineClassOp) v
@@ -409,9 +409,15 @@ inlineClassOp v =
     ClassOpId cls -> mkDictSelRhs cls <$> elemIndex v (classAllSelIds cls)
     _             -> Nothing
 
-onAppsFun :: (Id -> Maybe CoreExpr) -> ReExpr
-onAppsFun h (collectArgs -> (Var f, args)) = simpleOptExpr . (`mkApps` args) <$> h f
-onAppsFun _ _ = Nothing
+onExprHead :: (Id -> Maybe CoreExpr) -> ReExpr
+onExprHead h = go id
+ where
+   go cont (Var v)       = cont <$> h v
+   go cont (App fun arg) = go (cont . (`App` arg)) fun
+   go cont (Cast e co)   = go (cont . (`Cast` co)) e
+   go _ _                = Nothing
+
+-- I could also handle Let, but I think the simplifier does for me.
 
 -- Don't do abstReprCase, since it's been done already. Check the outer function
 -- being applied to see whether it's abst', $fHasRepFoo_$cabst (for some Foo),
