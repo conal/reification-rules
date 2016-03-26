@@ -27,7 +27,7 @@ import Data.Monoid
 import Data.Tuple (swap)
 
 import ReificationRules.Misc (Unop,Binop,BinRel,transpose)
-import ReificationRules.HOS (EP,repr,abst,reify)
+import ReificationRules.HOS (EP,repr,abst,reify,succI)
 import ReificationRules.Run
 
 import Circat.Complex
@@ -72,15 +72,21 @@ main = go "foo" t
 
 -- t = not False
 
+-- t x = x && not x
+
 -- t = (4 :: Int) > 3
 
 -- t = \ (x :: Bool) -> x
 
 -- t = \ (x :: Int) -> x
 
--- t = \ (x :: Int) -> x > 3
+-- t = \ x -> not x
 
 -- t = \ x -> not (not x)
+
+t x y = x || not y
+
+-- t = \ (x :: Int) -> x > 3
 
 -- t = 3 :: Int
 
@@ -112,6 +118,17 @@ main = go "foo" t
 
 -- t x = if x then (2,False) else (1 :: Int,True)
 
+-- t = (^) :: Binop Int
+
+-- t = \ (a :: Int) -> (a + 1) ^ (3 :: Int)
+
+-- -- Show off balanced product trees (4,5,6,8)
+-- t = \ (a :: Double) -> (a + 1) ^ (6 :: Int)
+
+-- t = \ (a :: Double) -> (a + 1) ^ (7 :: Int)
+
+-- t (x :: Int) = (3 :: Int) ^ x
+
 -- t = (5,6) :: (Int,Int)
 
 -- t = repr (2 :# 3 :: Pair Int)
@@ -124,9 +141,9 @@ main = go "foo" t
 
 -- t = 3 :# 5 :: Pair Int
 
--- t (x :: Int) = y * y where y = x + x
-
 -- t = \ case u :# v -> u + v :: Int
+
+-- t (x :: Int) = y * y where y = x + x
 
 -- t = \ case (R.B ts :: R.Pow Pair N2 Int) -> ts
 
@@ -140,15 +157,9 @@ main = go "foo" t
 
 -- t x = 2 :# (3 * x) :: Pair Int
 
--- t = fmap :: (Int -> Bool) -> Pair Int -> Pair Bool
-
 -- t = fmap not :: Unop (Pair Bool)
 
--- t = fmap :: (Int -> Bool) -> RTree N0 Int -> RTree N0 Bool
-
--- t = fmap :: (Int -> Bool) -> RTree N4 Int -> RTree N4 Bool
-
--- t = fmap not :: Unop (RTree N4 Bool)
+-- t = fmap (< 3) :: RTree N2 Int -> RTree N2 Bool
 
 -- t = Sum (3 :: Int)
 
@@ -160,7 +171,19 @@ main = go "foo" t
 
 -- t = mappend :: Binop (Sum Int)
 
--- t = sum :: RTree N6 Int -> Int
+-- t = sum :: RTree N1 Int -> Int
+
+-- t = sum (pure 1 :: Vec N4 Int)
+
+-- t = size @Pair
+
+-- t = size @(Vec N3)
+
+-- t = size @(RTree N3)
+
+-- t = size @(LTree N8)
+
+-- t = size @(R.Pow (Vec N3) N4)
 
 -- t = transpose :: Unop (Pair (Pair Bool))
 
@@ -185,7 +208,9 @@ main = go "foo" t
 
 -- t = lsums :: RTree N4 Int -> (RTree N4 Int, Int)
 
--- t = lsums :: LTree N4 Int -> (LTree N4 Int, Int)
+-- t = lsums :: LTree N6 Int -> (LTree N6 Int, Int)
+
+-- t = lsums :: Vec N6 Int -> (Vec N6 Int, Int)
 
 -- t = powers :: Int -> RTree N4 Int
 
@@ -196,10 +221,6 @@ main = go "foo" t
 
 -- t = fft :: Unop (Pair C)
 
--- t = fft :: LTree N3 C -> RTree N3 C
-
--- t = fft :: RTree N2 C -> LTree N2 C
-
 -- -- StateL casts
 -- t = lsums :: Vec N12 Int -> (Vec N12 Int, Int)
 
@@ -207,34 +228,20 @@ main = go "foo" t
     In progress
 --------------------------------------------------------------------}
 
--- t x = x && not x
-
--- t = 3 ^ (4 :: Int) :: Int
-
-t (x :: Int) = (3 :: Int) ^ x
-
--- t = (^) :: Binop Int
-
--- t = sum (pure 1 :: Vec N4 Int)
-
--- t = size @Pair
-
--- t = size @(Vec N3)
-
--- t = size @(RTree N3)
-
--- t = size @(LTree N8)
-
--- t = size @(R.Pow (Vec N3) N4)
-
-
-
 -- t = fft :: Unop (Vec N3 C)
 
 {--------------------------------------------------------------------
     Broken
 --------------------------------------------------------------------}
 
+-- t = fft :: LTree N3 C -> RTree N3 C
+
+-- t = fft :: RTree N2 C -> LTree N2 C
+
+-- -- Includes unboxed integers. Compiled without INLINE.
+-- t = succI
+
+-- -- No GenBuses instance
 -- t = mappend :: Binop Any
 
 {--------------------------------------------------------------------

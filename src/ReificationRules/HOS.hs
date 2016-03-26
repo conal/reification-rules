@@ -1,4 +1,13 @@
-{-# LANGUAGE CPP, GADTs, FlexibleContexts, KindSignatures, ExplicitForAll, ConstraintKinds, MagicHash, TypeOperators #-}
+{-# LANGUAGE CPP              #-}
+{-# LANGUAGE ConstraintKinds  #-}
+{-# LANGUAGE ExplicitForAll   #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs            #-}
+{-# LANGUAGE KindSignatures   #-}
+{-# LANGUAGE MagicHash        #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators    #-}
+
 {-# OPTIONS_GHC -Wall #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-} -- See orphans below
@@ -31,6 +40,7 @@
 module ReificationRules.HOS
   ( EP,toE,constP,appP,lamP,letP,letPairP,ifP,evalP,reifyP,reify, litE
   , abst,repr,abst',repr', abstP,reprP
+  , E, Prim
   , unI#
   , succI
   ) where
@@ -170,12 +180,9 @@ reify _ = error "reify: not implemented"
 
 -- "reify ^" reifyP (^) = constP PowIP
 
--- I've replaced these rules with explicit code in Plugin. Keep the commented
--- form around in case I want to revert when I have more polymorphic primitives.
-
--- "reify ^ @Int"    reifyP ((^) :: Int    -> Int -> Int   ) = constP PowIP
--- "reify ^ @Float"  reifyP ((^) :: Float  -> Int -> Float ) = constP PowIP
--- "reify ^ @Double" reifyP ((^) :: Double -> Int -> Double) = constP PowIP
+"PowIP @Int"    reifyP (^) = constP (PowIP @Int   )
+"PowIP @Float"  reifyP (^) = constP (PowIP @Float )
+"PowIP @Double" reifyP (^) = constP (PowIP @Double)
 
 -- Competitors to the rules in GHC.Reals using balanced multiplication trees to
 -- help parallelism. If/when I rebalance associative operations elsewhere, drop

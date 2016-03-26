@@ -2,8 +2,11 @@
 
 The code contains several "`TODO`" comments, some of which are also listed below.
 
+*   Automated testing.
+*   Better way to recognize constant expressions of primitive type, to turn them into literals in the reified representation.
 *   In `Plugin`, explore adding a stack of unreified arguments.
     When reifying a lambda, try to make a `let`.
+    Hm. I don't know how to keep a stack, since I want to reification to work via rewrite rules invoked by the simplifier.
 *   Alternatively (I think), try unfolding (inlining application head) earlier.
     Doing so might result in much simpler generated code by avoiding many beta-redexes.
     If I do, take care not to inline "primitives".

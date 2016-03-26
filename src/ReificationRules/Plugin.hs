@@ -582,14 +582,22 @@ plugin = defaultPlugin { installCoreToDos = install }
 
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 install opts todos =
-  do reinitializeGlobals
-     rr <- mkReifyRule opts
-     -- For now, just insert the rule.
-     -- TODO: add "reify_" bindings and maybe rules.
-     let addRule guts = pure (on_mg_rules (rr guts :) guts)
-     return $   CoreDoPluginPass "Reify insert rule" addRule
-              : CoreDoSimplify 1 mode
-              : todos
+  do pprTrace "Reify install" empty (return ())
+     dflags <- getDynFlags
+     -- Unfortunately, the plugin doesn't work in GHCi. Until I can fix it,
+     -- disable under GHCi, so we can at least type-check conveniently.
+     -- TODO: Try some flags.
+     if hscTarget dflags == HscInterpreted then
+        return todos
+      else
+       do reinitializeGlobals
+          rr <- mkReifyRule opts
+          -- For now, just insert the rule.
+          -- TODO: add "reify_" bindings and maybe rules.
+          let addRule guts = pure (on_mg_rules (rr guts :) guts)
+          return $   CoreDoPluginPass "Reify insert rule" addRule
+                   : CoreDoSimplify 1 mode
+                   : todos
  where
    -- Extra simplifier pass for reification.
    -- Rules on, no inlining, and case-of-case.
@@ -642,7 +650,7 @@ mkReifyEnv opts = do
   prePostV <- findMiscId "-->"
   primMap  <- mapM findMonoId stdMethMap
   let lookupPrim v tys = M.lookup (tweak (uqVarName v) tys) primMap
-      primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId []{-tys-} []])
+      primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys {- [] -} []])
                          <$> lookupPrim v tys
       isPrimApp (unVarApps -> Just (v,tys,_)) = isJust (lookupPrim v tys)
       isPrimApp _ = False
@@ -766,7 +774,7 @@ toLitM hasLitTc toLitV =
    isLiteral (collectArgs -> (Var v, _)) =
      isJust (isDataConId_maybe v) ||
      uqVarName v `elem`
-       ["$fNumInt_$cfromInteger", "$fNumDouble_$cfromInteger"] -- , "int2Double"
+       ["$fNumInt_$cfromInteger", "$fNumDouble_$cfromInteger","int2Double"]
    isLiteral _ = False
 
 -- TODO: check args in isLiteral to make sure that they don't need reifying.

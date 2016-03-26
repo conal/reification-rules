@@ -1,6 +1,6 @@
 Name:               reification-rules
 Version:            0.0.0
-Cabal-Version:      >= 1.6
+Cabal-Version:      >= 1.10
 Synopsis:           GHC Core reification via rules
 Category:           reification
 Description:
@@ -18,8 +18,8 @@ source-repository head
   location: git://github.com/conal/reification-rules.git
 
 Library
+  default-language: Haskell98
   hs-Source-Dirs:   src
-  Extensions:
   Build-Depends:    base<5
                   , containers
                   , ghc >= 7.10.3
@@ -32,7 +32,7 @@ Library
 
 -- TODO: drop ty, and use Data.Type.Equality
 
--- I only use hermit for initTcFromModGuts. Try to drop the dependency.
+-- I only use hermit for initTcFromModGuts. To do: drop the dependency.
 
   Exposed-Modules:
                     ReificationRules.Misc
@@ -48,3 +48,25 @@ Library
                     ReificationRules.Run
   ghc-options:      -Wall
 
+
+Test-Suite test-reify
+  type:             detailed-0.9
+  default-language: Haskell98
+  hs-Source-Dirs:   test
+  test-module:      Suite
+  other-modules:    ExamplesForSuite
+  Build-Depends:    base<5
+                  , containers
+                  , ghc >= 7.10.3
+                  , ghc-prim
+                  , constraints
+                  , transformers >= 0.4
+                  , ty >= 0.1.5
+                  , hermit >= 1.0.0.1
+                  , circat
+                  , Cabal >= 1.10
+                  , reification-rules
+
+  ghc-options:      -O
+
+--   ghc-options:      -O -fplugin=ReificationRules.Plugin -fplugin-opt=ReificationRules.Plugin:trace
