@@ -54,7 +54,6 @@ Test-Suite test-reify
   default-language: Haskell98
   hs-Source-Dirs:   test
   test-module:      Suite
-  other-modules:    ExamplesForSuite
   Build-Depends:    base<5
                   , containers
                   , ghc >= 7.10.3
@@ -67,6 +66,9 @@ Test-Suite test-reify
                   , Cabal >= 1.10
                   , reification-rules
 
+                  -- TODO: trim depends
+
   ghc-options:      -O
 
---   ghc-options:      -O -fplugin=ReificationRules.Plugin -fplugin-opt=ReificationRules.Plugin:trace
+--   ghc-options:      -O -fplugin=ReificationRules.Plugin
+--                     -fplugin-opt=ReificationRules.Plugin:trace

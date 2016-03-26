@@ -18,24 +18,36 @@
 -- Suite of automated tests
 ----------------------------------------------------------------------
 
+{-# OPTIONS_GHC -fplugin=ReificationRules.Plugin -dcore-lint -fexpose-all-unfoldings #-}
+{-# OPTIONS_GHC -dsuppress-idinfo -dsuppress-module-prefixes -dsuppress-uniques #-}
+
+-- {-# OPTIONS_GHC -fplugin-opt=ReificationRules.Plugin:trace  #-}
+
 module Suite (tests) where
 
 import Distribution.TestSuite
 
-import ReificationRules.HOS (E,Prim)
+import ReificationRules.HOS (E,Prim,reify)
 import qualified ReificationRules.Run as Run
 
-import ExamplesForSuite
-
 tests :: IO [Test]
-
 tests = return
-  [ mkTest "reNot"   reNot
-  , mkTest "reOrNot" reOrNot
+  [ test "reNot"   $ not
+  , test "reOrNot" $ \ x y -> x || not y
+  , test "true"    $ True
+  , test "false"   $ False
   ]
 
 render :: Bool
 render = True -- False
+
+test :: Run.Okay a => String -> a -> Test
+test _ _ = error "test called"
+{-# NOINLINE test #-}
+
+{-# RULES "test" forall nm a.
+  test nm a = mkTest nm (reify a)
+  #-}
 
 mkTest :: Run.Okay a => String -> E Prim a -> Test
 mkTest nm e = Test inst
@@ -51,24 +63,3 @@ mkTest nm e = Test inst
             , options   = []
             , setOption = \_ _ -> Right inst
             }
-
--- tests = return []
-
--- <https://www.haskell.org/cabal/users-guide/developing-packages.html#test-suites>
-
--- tests = return [ Test succeeds, Test fails ]
---   where
---     succeeds = TestInstance
---         { run = return $ Finished Pass
---         , name = "succeeds"
---         , tags = []
---         , options = []
---         , setOption = \_ _ -> Right succeeds
---         }
---     fails = TestInstance
---         { run = return $ Finished $ Fail "Always fails!"
---         , name = "fails"
---         , tags = []
---         , options = []
---         , setOption = \_ _ -> Right fails
---         }
