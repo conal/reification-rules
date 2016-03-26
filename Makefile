@@ -3,7 +3,7 @@
 install:
 	cabal install -j1 --disable-documentation --force-reinstalls
 
-tests:
+suite:
 	cabal install -j1 --disable-documentation --force-reinstalls --enable-tests
 	cabal test
 

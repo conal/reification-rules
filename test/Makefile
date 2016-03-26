@@ -7,6 +7,9 @@ plugin=ReificationRules.Plugin
 
 default: go
 
+suite:
+	cd .. ; make suite
+
 check-ghc:
 	ghc --version
 
