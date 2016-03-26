@@ -219,6 +219,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Case scrut v altsTy alts
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
+     Trying("unfold castee")
+     Cast (unfoldMaybe -> Just e') co -> tryReify $ Cast e' co
      Trying("cast")
      Cast e (recast -> Just f) -> tryReify (App f e)
      Trying("repMeth")
@@ -385,8 +387,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
         maybe (if beforeTy `eqType` afterTy then
                  return after
                else
-                 oops "type change" (ppr beforeTy <+> text "vs" <+> ppr afterTy
-                                     <+> text "in" $$ text ""))
+                 oops "type change"
+                  (ppr beforeTy <+> text "vs" <+> ppr afterTy <+> text "in"))
               (oops "Lint")
           (lintExpr dflags (varSetElems (exprFreeVars before)) before)
    lintReExpr rew before = rew before
@@ -582,7 +584,7 @@ plugin = defaultPlugin { installCoreToDos = install }
 
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 install opts todos =
-  do pprTrace "Reify install" empty (return ())
+  do -- pprTrace "Reify install" empty (return ())
      dflags <- getDynFlags
      -- Unfortunately, the plugin doesn't work in GHCi. Until I can fix it,
      -- disable under GHCi, so we can at least type-check conveniently.
