@@ -65,6 +65,7 @@ Test-Suite test-reify
                   , circat
                   , Cabal >= 1.10
                   , reification-rules
+                  , shaped-types
 
                   -- TODO: trim depends
 
