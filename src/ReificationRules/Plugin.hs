@@ -223,11 +223,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
        -> tryReify $ Case scrut' v altsTy alts
      Trying("cast-of-reify")
      Cast e co | Just nco <- setNominalRole_maybe co ->
-       let co' = mkAppCo (mkReflCo Nominal epTy) nco in
+       let co' = mkAppCo (mkRepReflCo epTy) nco in  -- why *Rep*ReflCo?
          -- pprTrace "cast-of-reify" (ppr nco) $
          (`Cast` co') <$> tryReify e
      Trying("recast")
-     Cast e (recast -> Just f) -> pprTrace "recast" empty $
+     Cast e (recast -> Just f) -> -- pprTrace "recast" empty $
                                   tryReify (App f e)
      Trying("unfold castee")
      -- Does this one ever fire anymore?
@@ -342,18 +342,25 @@ reify (ReifyEnv {..}) guts dflags inScope =
               | otherwise                               = Nothing
     where
       recast' :: Coercion -> Maybe CoreExpr
+      recast' co | pprTrace "recast'" (ppr co) False = undefined
       recast' (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
       recast' (FunCo _r domCo ranCo) =
         liftA2 mkPrePost (recast' (mkSymCo domCo)) (recast' ranCo) -- co/contravariant
       recast' (TransCo outer inner) = mkCompose <$> recast' outer <*> recast' inner
       recast' co@(       AxiomInstCo {} ) = recastRep reprV pFst co
       recast' co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
-      recast' (SubCo co) = recast' co
+      recast' (SubCo co) = recast' co  -- okay?
       -- Panic for now, to reduce output.
       -- Maybe stick with the panic, and drop the Maybe.
-      -- recast' co = pprPanic "recast': unhandled coercion" (ppr co <+> dcolon $$ ppr (coercionType co))
-      recast' co = pprTrace "recast': unhandled coercion" (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
-      recastRep v get co = ($ v) <$> hrMeth (get (coercionKind co))
+      -- recast' co = pprPanic "recast: unhandled coercion" (ppr co <+> dcolon $$ ppr (coercionType co))
+      recast' (AppCo fun arg)
+        | pprTrace "recast' AppCo:" (ppr (fun,arg)) False = undefined
+      recast' co = pprTrace ("recast: unhandled " ++ coercionTag co ++ " coercion:")
+                   (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
+      recastRep v get co
+        | Just f <- hrMeth (get (coercionKind co)) = Just (f v)
+        | otherwise = pprTrace "recastRep failure:" (ppr (get (coercionKind co)))
+                      Nothing
    -- TODO: Check the type, in case the coercion is not
    -- Rep a -> a or a -> Rep a.
    unfolded :: Unop CoreExpr
@@ -412,6 +419,25 @@ reify (ReifyEnv {..}) guts dflags inScope =
       --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
       Just (a',a) = splitFunTy_maybe (exprType f)
       Just (b,b') = splitFunTy_maybe (exprType g)
+
+-- To help debug. Sometimes I'm unsure what constructor goes with what ppr.
+coercionTag :: Coercion -> String
+coercionTag Refl        {} = "Refl"
+coercionTag TyConAppCo  {} = "TyConAppCo"
+coercionTag AppCo       {} = "AppCo"
+coercionTag ForAllCo    {} = "ForAllCo"
+coercionTag CoVarCo     {} = "CoVarCo"
+coercionTag AxiomInstCo {} = "AxiomInstCo"
+coercionTag UnivCo      {} = "UnivCo"
+coercionTag SymCo       {} = "SymCo"
+coercionTag TransCo     {} = "TransCo"
+coercionTag AxiomRuleCo {} = "AxiomRuleCo"
+coercionTag NthCo       {} = "NthCo"
+coercionTag LRCo        {} = "LRCo"
+coercionTag InstCo      {} = "InstCo"
+coercionTag CoherenceCo {} = "CoherenceCo"
+coercionTag KindCo      {} = "KindCo"
+coercionTag SubCo       {} = "SubCo"
 
 -- TODO: Should I unfold (inline application head) earlier? Doing so might
 -- result in much simpler generated code by avoiding many beta-redexes. If I
