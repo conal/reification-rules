@@ -89,7 +89,8 @@ data ReifyEnv = ReifyEnv { appV       :: Id
 -- TODO: Perhaps drop reifyV, since it's in the rule
 
 -- TODO: try replacing the identifiers with convenient functions that use them,
--- thus shifting some complexity from reify to mkReifyEnv. 
+-- thus shifting some complexity from reify to mkReifyEnv. For instance, replace
+-- composeV with mkCompose and prePostV with mkPrePost.
 
 -- Whether to run Core Lint after every step
 lintSteps :: Bool
@@ -330,24 +331,17 @@ reify (ReifyEnv {..}) guts dflags inScope =
    recast (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
    recast (FunCo _r domCo ranCo) =
      liftA2 mkPrePost (recast (mkSymCo domCo)) (recast ranCo) -- co/contravariant
-    where
-      mkPrePost f g = unfolded $ varApps prePostV [a,b,a',b'] [f,g]
-       where
-         -- (-->) :: forall a b a' b'.
-         --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
-         Just (a',a) = splitFunTy_maybe (exprType f)
-         Just (b,b') = splitFunTy_maybe (exprType g)
+   recast (TransCo outer inner) = mkCompose <$> recast outer <*> recast inner
    recast co@(       AxiomInstCo {} ) = recastRep reprV pFst co
    recast co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
    recast (SubCo co) = recast co
    -- Panic for now, to reduce output.
    -- Maybe stick with the panic, and drop the Maybe.
-   recast co = pprPanic "recast: unhandled coercion" (ppr co <+> dcolon <+> ppr (coercionType co))
-   -- recast co = dtrace "recast: unhandled coercion" (ppr co) Nothing
+   -- recast co = pprPanic "recast: unhandled coercion" (ppr co <+> dcolon $$ ppr (coercionType co))
+   recast co = pprTrace "recast: unhandled coercion" (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
    recastRep v get co = ($ v) <$> hrMeth (get (coercionKind co))
    -- TODO: Check the type, in case the coercion is not
    -- Rep a -> a or a -> Rep a.
-
    unfolded :: Unop CoreExpr
    unfolded e = fromMaybe e (unfoldMaybe e)               
    -- Inline in applications (function part) and casts.
@@ -392,6 +386,18 @@ reify (ReifyEnv {..}) guts dflags inScope =
               (oops "Lint")
           (lintExpr dflags (varSetElems (exprFreeVars before)) before)
    lintReExpr rew before = rew before
+   mkCompose :: Binop CoreExpr
+   g `mkCompose` f = varApps composeV [b,c,a] [g,f]
+    where
+      -- (.) :: forall b c a. (b -> c) -> (a -> b) -> a -> c
+      Just (b,c) = splitFunTy_maybe (exprType g)
+      Just (a,_) = splitFunTy_maybe (exprType f)
+   mkPrePost f g = unfolded $ varApps prePostV [a,b,a',b'] [f,g]
+    where
+      -- (-->) :: forall a b a' b'.
+      --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
+      Just (a',a) = splitFunTy_maybe (exprType f)
+      Just (b,b') = splitFunTy_maybe (exprType g)
 
 -- TODO: Should I unfold (inline application head) earlier? Doing so might
 -- result in much simpler generated code by avoiding many beta-redexes. If I
