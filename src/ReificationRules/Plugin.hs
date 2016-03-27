@@ -80,6 +80,7 @@ data ReifyEnv = ReifyEnv { appV       :: Id
                          , prePostV   :: Id
                          , ifPV       :: Id
                          , ifCatTy    :: Type -> Type
+                         , epTy       :: Type
                          , hasRepMeth :: HasRepMeth
                          , hasLit     :: HasLit
                          , tracing    :: Bool
@@ -112,7 +113,7 @@ type ReExpr = Rewrite CoreExpr
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
 reify (ReifyEnv {..}) guts dflags inScope =
   -- pprTrace "reify rule" empty $
-  traceRewrite "reify" $
+  traceRewrite "reifyP" $
   lintReExpr $
   go
  where
@@ -205,7 +206,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
        tryReify $
          mkCoreLet (NonRec n (App (Var unIV) scrut)) rhs
 --          mkCoreLets [ (NonRec w' scrut)
---                     , (NonRec n ({-mkCoreApp (text "reify") -} App (Var unIV) (Var w'))) ]
+--                     , (NonRec n ({-mkCoreApp (text "reifyP") -} App (Var unIV) (Var w'))) ]
 --            rhs
       where
         w' = zapIdOccInfo w
@@ -220,10 +221,18 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Case scrut v altsTy alts
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
+     Trying("cast-of-reify")
+     Cast e co | Just nco <- setNominalRole_maybe co ->
+       let co' = mkAppCo (mkReflCo Nominal epTy) nco in
+         -- pprTrace "cast-of-reify" (ppr nco) $
+         (`Cast` co') <$> tryReify e
      Trying("recast")
-     Cast e (recast -> Just f) -> tryReify (App f e)
+     Cast e (recast -> Just f) -> pprTrace "recast" empty $
+                                  tryReify (App f e)
      Trying("unfold castee")
-     Cast (unfoldMaybe -> Just e') co -> tryReify $ Cast e' co
+     -- Does this one ever fire anymore?
+     Cast (unfoldMaybe -> Just e') co -> -- pprTrace "unfold castee" empty $
+                                         tryReify $ Cast e' co
      Trying("repMeth")
      (repMeth -> Just e) -> Just e
      Trying("literal")
@@ -260,7 +269,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
              , Just reV <- tryReify v
        ->
         Just (varApps appV [dom,ran] [reU,reV])
-     _e -> pprTrace "reify" (text "Unhandled:" <+> ppr _e) $
+     _e -> pprTrace "reifyP" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
    -- v --> ("v'", eval v')
@@ -323,23 +332,28 @@ reify (ReifyEnv {..}) guts dflags inScope =
          e' = traceUnop ("simplify " ++ show inlining ++ ", pass " ++ show n)
               (simplifyE dflags inlining) e
 #endif
-   -- Convert a coercion (being used in a cast) to an equivalent Core function to
-   -- apply.
-   -- TODO: Consider handling casts one layer at a time (non-recursively),
-   -- leaving behind simpler casts.
+   -- Convert a coercion (being used in a cast) to an equivalent Core function
+   -- to apply. I considered handling casts one layer at a time
+   -- (non-recursively), leaving behind simpler casts, but in at least some
+   -- cases, I expect that GHC's simplifier would undo my work, causing an
+   -- infinite simplification chain.
    recast :: Coercion -> Maybe CoreExpr
-   recast (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
-   recast (FunCo _r domCo ranCo) =
-     liftA2 mkPrePost (recast (mkSymCo domCo)) (recast ranCo) -- co/contravariant
-   recast (TransCo outer inner) = mkCompose <$> recast outer <*> recast inner
-   recast co@(       AxiomInstCo {} ) = recastRep reprV pFst co
-   recast co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
-   recast (SubCo co) = recast co
-   -- Panic for now, to reduce output.
-   -- Maybe stick with the panic, and drop the Maybe.
-   -- recast co = pprPanic "recast: unhandled coercion" (ppr co <+> dcolon $$ ppr (coercionType co))
-   recast co = pprTrace "recast: unhandled coercion" (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
-   recastRep v get co = ($ v) <$> hrMeth (get (coercionKind co))
+   recast co0 | reifiableType (pFst (coercionKind co0)) = recast' co0
+              | otherwise                               = Nothing
+    where
+      recast' :: Coercion -> Maybe CoreExpr
+      recast' (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
+      recast' (FunCo _r domCo ranCo) =
+        liftA2 mkPrePost (recast' (mkSymCo domCo)) (recast' ranCo) -- co/contravariant
+      recast' (TransCo outer inner) = mkCompose <$> recast' outer <*> recast' inner
+      recast' co@(       AxiomInstCo {} ) = recastRep reprV pFst co
+      recast' co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
+      recast' (SubCo co) = recast' co
+      -- Panic for now, to reduce output.
+      -- Maybe stick with the panic, and drop the Maybe.
+      -- recast' co = pprPanic "recast': unhandled coercion" (ppr co <+> dcolon $$ ppr (coercionType co))
+      recast' co = pprTrace "recast': unhandled coercion" (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
+      recastRep v get co = ($ v) <$> hrMeth (get (coercionKind co))
    -- TODO: Check the type, in case the coercion is not
    -- Rep a -> a or a -> Rep a.
    unfolded :: Unop CoreExpr
@@ -584,7 +598,7 @@ mkReifyRule opts = reRule <$> mkReifyEnv opts
  where
    reRule :: ReifyEnv -> ModGuts -> CoreRule
    reRule ops guts =
-     BuiltinRule { ru_name  = fsLit "reify"
+     BuiltinRule { ru_name  = fsLit "reifyP"
                  , ru_fn    = varName (reifyV ops)
                  , ru_nargs = 2  -- including type arg
                  , ru_try   = \ dflags inScope _fn [_ty,arg] ->
@@ -680,7 +694,9 @@ mkReifyEnv opts = do
   hasLit     <- toLitM hasLitTc toLitV
   circuitTc  <- findTc "Circat.Circuit" ":>"
   ifCatTc    <- findTc "Circat.Classes" "IfCat"
-  let circuitTy = mkTyConApp circuitTc []
+  epTc       <- findTc "ReificationRules.HOS" "EP"
+  let epTy      = mkTyConApp epTc []
+      circuitTy = mkTyConApp circuitTc []
       ifCatTy t = mkTyConApp ifCatTc [circuitTy,t]
       tracing   = "trace" `elem` opts
   return (ReifyEnv { .. })
