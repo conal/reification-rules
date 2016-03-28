@@ -97,9 +97,9 @@ data ReifyEnv = ReifyEnv { appV       :: Id
 lintSteps :: Bool
 lintSteps = True -- False
 
--- Keep this one False for simplifier synergy.
-recursively :: Bool
-recursively = False -- True
+-- -- Keep this one False for simplifier synergy.
+-- recursively :: Bool
+-- recursively = False -- True
 
 type Rewrite a = a -> Maybe a
 type ReExpr = Rewrite CoreExpr
@@ -149,16 +149,6 @@ reify (ReifyEnv {..}) guts dflags inScope =
                                       [strY,rhs',Lam y body'])
                    (tryReify rhs)
                    (tryReify (subst1 x evalY body))
-#endif
-     Trying("case-of-cast")
-     Case (Cast e co) wild ty alts ->
-       do scrut' <- (`App` e) <$> recast co
-          tryReify (Case scrut' wild ty alts)
-#if 0
-     Trying("case-of-case")
-     -- Give the simplifier another shot
-     _e@(Case (Case {}) _ _ _) -> -- Nothing
-                                  tryReify (simplE False _e) -- still necessary?
 #endif
      Trying("if-then-else")
      e@(Case scrut wild rhsTy [ (DataAlt false, [], falseVal)
@@ -217,10 +207,24 @@ reify (ReifyEnv {..}) guts dflags inScope =
        , Just meth <- hrMeth (exprType scrut)
        -> tryReify $ -- go  -- Less chatty with go
           Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
+#if 1
+     -- Can these two ever help? They did, I think.
+     Trying("recast scrutinee")
+     Case (Cast e co) wild ty alts | Just scrut' <- (`App` e) <$> recast co ->
+       tryReify (Case scrut' wild ty alts)
      Trying("unfold scrutinee")
      Case scrut v altsTy alts
+       -- | pprTrace ("unfold scrutinee -- trying") (ppr scrut) False -> undefined
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
+#endif
+#if 1
+     Trying("case-of-case")
+     -- Give the simplifier another shot
+     e@(Case _scrut@(Case {}) _ _ _) -> -- Nothing
+         -- pprTrace ("case-of-case -- trying") (ppr _scrut) $
+         tryReify (simplE False e) -- still necessary?
+#endif
      Trying("cast-of-reify")
      Cast e co | Just nco <- setNominalRole_maybe co ->
        let co' = mkAppCo (mkRepReflCo epTy) nco in  -- why *Rep*ReflCo?
@@ -285,8 +289,9 @@ reify (ReifyEnv {..}) guts dflags inScope =
    tryReify :: ReExpr
    -- tryReify e | pprTrace "tryReify" (ppr e) False = undefined
    -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
-   tryReify e | reifiableExpr e = (guard recursively >> go e) <|> Just (mkReify e)
-              | otherwise = -- pprTrace "Not reifiable:" (ppr e)
+   tryReify e | reifiableExpr e = -- (guard recursively >> go e) <|>
+                                  Just (mkReify e)
+              | otherwise = pprTrace "tryReify: not reifiable:" (ppr e)
                             Nothing
    hrMeth :: Type -> Maybe (Id -> CoreExpr)
    hrMeth = hasRepMeth dflags guts inScope
@@ -346,17 +351,15 @@ reify (ReifyEnv {..}) guts dflags inScope =
       recast' (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
       recast' (FunCo _r domCo ranCo) =
         liftA2 mkPrePost (recast' (mkSymCo domCo)) (recast' ranCo) -- co/contravariant
-      recast' (TransCo outer inner) = mkCompose <$> recast' outer <*> recast' inner
+      recast' (TransCo inner outer) = pprTrace "TransCo" empty $ -- order?
+                                      mkCompose <$> recast' outer <*> recast' inner
       recast' co@(       AxiomInstCo {} ) = recastRep reprV pFst co
       recast' co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
       recast' (SubCo co) = recast' co  -- okay?
-      -- Panic for now, to reduce output.
-      -- Maybe stick with the panic, and drop the Maybe.
-      -- recast' co = pprPanic "recast: unhandled coercion" (ppr co <+> dcolon $$ ppr (coercionType co))
       recast' (AppCo fun arg)
         | pprTrace "recast' AppCo:" (ppr (fun,arg)) False = undefined
       recast' co = pprTrace ("recast: unhandled " ++ coercionTag co ++ " coercion:")
-                   (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
+                     (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
       recastRep v get co
         | Just f <- hrMeth (get (coercionKind co)) = Just (f v)
         | otherwise = pprTrace "recastRep failure:" (ppr (get (coercionKind co)))
@@ -395,9 +398,10 @@ reify (ReifyEnv {..}) guts dflags inScope =
    lintReExpr :: Unop ReExpr
    lintReExpr rew before | lintSteps =
      do after <- rew before
-        let oops str doc = pprPanic ("reify post-transfo check. " ++ str)
-                             (doc $$ ppr before $$ text "-->" $$ ppr after)
-            beforeTy = exprType (mkReify before)
+        let before' = mkReify before
+            oops str doc = pprPanic ("reify post-transfo check. " ++ str)
+                             (doc $$ ppr before' $$ text "-->" $$ ppr after)
+            beforeTy = exprType before'
             afterTy  = exprType after
         maybe (if beforeTy `eqType` afterTy then
                  return after
@@ -419,49 +423,6 @@ reify (ReifyEnv {..}) guts dflags inScope =
       --          (a' -> a) -> (b -> b') -> ((a -> b) -> (a' -> b'))
       Just (a',a) = splitFunTy_maybe (exprType f)
       Just (b,b') = splitFunTy_maybe (exprType g)
-
--- To help debug. Sometimes I'm unsure what constructor goes with what ppr.
-coercionTag :: Coercion -> String
-coercionTag Refl        {} = "Refl"
-coercionTag TyConAppCo  {} = "TyConAppCo"
-coercionTag AppCo       {} = "AppCo"
-coercionTag ForAllCo    {} = "ForAllCo"
-coercionTag CoVarCo     {} = "CoVarCo"
-coercionTag AxiomInstCo {} = "AxiomInstCo"
-coercionTag UnivCo      {} = "UnivCo"
-coercionTag SymCo       {} = "SymCo"
-coercionTag TransCo     {} = "TransCo"
-coercionTag AxiomRuleCo {} = "AxiomRuleCo"
-coercionTag NthCo       {} = "NthCo"
-coercionTag LRCo        {} = "LRCo"
-coercionTag InstCo      {} = "InstCo"
-coercionTag CoherenceCo {} = "CoherenceCo"
-coercionTag KindCo      {} = "KindCo"
-coercionTag SubCo       {} = "SubCo"
-
--- TODO: Should I unfold (inline application head) earlier? Doing so might
--- result in much simpler generated code by avoiding many beta-redexes. If I
--- do, take care not to inline "primitives". I think it'd be fairly easy.
-
--- Try to inline an identifier.
--- TODO: Also class ops
-inlineId :: Id -> Maybe CoreExpr
-inlineId v = maybeUnfoldingTemplate (realIdUnfolding v)
-
--- Adapted from Andrew Farmer's getUnfoldingsT in HERMIT.Dictionary.Inline:
-inlineClassOp :: Id -> Maybe CoreExpr
-inlineClassOp v =
-  case idDetails v of
-    ClassOpId cls -> mkDictSelRhs cls <$> elemIndex v (classAllSelIds cls)
-    _             -> Nothing
-
-onExprHead :: (Id -> Maybe CoreExpr) -> ReExpr
-onExprHead h = go id
- where
-   go cont (Var v)       = cont <$> h v
-   go cont (App fun arg) = go (cont . (`App` arg)) fun
-   go cont (Cast e co)   = go (cont . (`Cast` co)) e
-   go _ _                = Nothing
 
 -- I could also handle Let, but I think the simplifier does for me.
 
@@ -650,7 +611,7 @@ install opts todos =
           -- TODO: add "reify_" bindings and maybe rules.
           let addRule guts = pure (on_mg_rules (rr guts :) guts)
           return $   CoreDoPluginPass "Reify insert rule" addRule
-                   : CoreDoSimplify 1 mode
+                   : CoreDoSimplify 2 mode
                    : todos
  where
    -- Extra simplifier pass for reification.
@@ -746,7 +707,8 @@ hasRepMethodM hasRepTc repTc idV =
   do hscEnv <- getHscEnv
      eps    <- liftIO (hscEPS hscEnv)
      return $ \ dflags guts inScope ty ->
-       let newtypeRep :: Maybe (CoreExpr,(Coercion,Type))
+       let repTy = mkTyConApp repTc [ty]
+           newtypeRep :: Maybe (CoreExpr,(Coercion,Type))
 #if 0
            newtypeRep = Nothing
 #else
@@ -754,8 +716,8 @@ hasRepMethodM hasRepTc repTc idV =
              do (tc,tyArgs) <- splitTyConApp_maybe ty
                 (tvs,newtyRhs,_coax) <- unwrapNewTyCon_maybe tc
                 -- TODO: refactor to isolate the Maybe stuff.
-                let repTy = mkTyConApp repTc [ty]
-                    ty'   = substTy (zipTvSubst tvs tyArgs) newtyRhs
+                -- pprTrace "newtypeRep. coax:" (ppr _coax) (return ())
+                let ty'   = substTy (zipTvSubst tvs tyArgs) newtyRhs
                     [hasRepDc] = tyConDataCons hasRepTc
                     mkIdFun t = varApps idV [t] []
                     repNt = UnivCo (PluginProv "RepNT") Representational ty repTy
@@ -772,11 +734,11 @@ hasRepMethodM hasRepTc repTc idV =
            findRep :: Maybe (CoreExpr,(Coercion,Type))
            findRep =
              (, normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
-                  Nominal (mkTyConApp repTc [ty]) )
+                  Nominal repTy )
              <$> buildDictionary hscEnv dflags guts inScope
                    (mkTyConApp hasRepTc [ty])
            mkMethApp (dict,(co,ty')) =
-             -- pprTrace "hasRepMeth" (ppr (dict,co,ty')) $
+             pprTrace "hasRepMeth" (ppr ty <+> text "-->" <+> ppr (dict,co,ty')) $
              \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
                        varApps meth [ty,ty'] [dict,mkEqBox co]
        in
@@ -924,3 +886,49 @@ onCaseRhs _ _ e = pprPanic "onCaseRhs. Not a case: " (ppr e)
 
 onAltRhs :: Unop CoreExpr -> Unop CoreAlt
 onAltRhs f (con,bs,rhs) = (con,bs,f rhs)
+
+-- To help debug. Sometimes I'm unsure what constructor goes with what ppr.
+coercionTag :: Coercion -> String
+coercionTag Refl        {} = "Refl"
+coercionTag TyConAppCo  {} = "TyConAppCo"
+coercionTag AppCo       {} = "AppCo"
+coercionTag ForAllCo    {} = "ForAllCo"
+coercionTag CoVarCo     {} = "CoVarCo"
+coercionTag AxiomInstCo {} = "AxiomInstCo"
+coercionTag UnivCo      {} = "UnivCo"
+coercionTag SymCo       {} = "SymCo"
+coercionTag TransCo     {} = "TransCo"
+coercionTag AxiomRuleCo {} = "AxiomRuleCo"
+coercionTag NthCo       {} = "NthCo"
+coercionTag LRCo        {} = "LRCo"
+coercionTag InstCo      {} = "InstCo"
+coercionTag CoherenceCo {} = "CoherenceCo"
+coercionTag KindCo      {} = "KindCo"
+coercionTag SubCo       {} = "SubCo"
+
+-- TODO: Should I unfold (inline application head) earlier? Doing so might
+-- result in much simpler generated code by avoiding many beta-redexes. If I
+-- do, take care not to inline "primitives". I think it'd be fairly easy.
+
+-- Try to inline an identifier.
+-- TODO: Also class ops
+inlineId :: Id -> Maybe CoreExpr
+inlineId v = maybeUnfoldingTemplate (realIdUnfolding v)
+
+-- Adapted from Andrew Farmer's getUnfoldingsT in HERMIT.Dictionary.Inline:
+inlineClassOp :: Id -> Maybe CoreExpr
+inlineClassOp v =
+  case idDetails v of
+    ClassOpId cls -> mkDictSelRhs cls <$> elemIndex v (classAllSelIds cls)
+    _             -> Nothing
+
+onExprHead :: (Id -> Maybe CoreExpr) -> ReExpr
+onExprHead h = (fmap.fmap) simpleOptExpr $
+               go id
+ where
+   go cont (Var v)       = cont <$> h v
+   go cont (App fun arg) = go (cont . (`App` arg)) fun
+   go cont (Cast e co)   = go (cont . (`Cast` co)) e
+   go _ _                = Nothing
+
+-- The simpleOptExpr here helps keep simplification going.
