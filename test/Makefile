@@ -26,6 +26,7 @@ GhcFlags += -fforce-recomp
 # GhcFlags += -ddump-simpl-iterations
 
 # GhcFlags += -dshow-passes
+
 # GhcFlags += -ddump-inlinings
 
 GhcFlags += -dsuppress-idinfo
@@ -39,6 +40,7 @@ GhcFlags += -dsuppress-module-prefixes
 
 # GhcFlags += -ddump-rule-rewrites
 
+# # Occasionally this one instead (just shows rule names)
 # GhcFlags += -ddump-rule-firings
 
 # GhcFlags += -ddump-rules
@@ -58,8 +60,11 @@ GhcFlags += -fsimpl-tick-factor=200
 # Specialization blows up transpose code exponentially. Revisit when we reify partially.
 GhcFlags += -fno-specialise
 
-# # Trace reification
-# GhcFlags += -fplugin-opt=$(plugin):trace
+# Experiment
+GhcFlags += -fno-pre-inlining
+
+# Trace reification
+GhcFlags += -fplugin-opt=$(plugin):trace
 
 compile=time $(ghc) -O -fplugin=$(plugin) $(GhcFlags)
 
@@ -81,6 +86,9 @@ compile:
 circat:
 	cd $(circat) ; make
 	make compile
+
+%.iface: %.hi
+	$(ghc) --show-iface $*.hi > $*.iface
 
 HI_DIR = ../dist/build/ReificationRules
 

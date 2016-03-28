@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, LambdaCase, GADTs, TypeOperators, DataKinds, TypeApplications #-}
+{-# LANGUAGE CPP, LambdaCase, GADTs, TypeOperators, DataKinds, TypeApplications, TypeFamilies #-}
 
 {-# OPTIONS_GHC -Wall -fno-warn-unticked-promoted-constructors -fno-warn-missing-signatures #-}
 
@@ -25,6 +25,7 @@ import Data.Foldable
 
 import Data.Monoid
 import Data.Tuple (swap)
+import GHC.Generics hiding (C)
 
 import ReificationRules.Misc (Unop,Binop,BinRel,transpose)
 import ReificationRules.HOS (EP,repr,abst,reify,succI)
@@ -39,21 +40,23 @@ import Circat.Rep ()
 import ShapedTypes.Nat
 import ShapedTypes.Pair
 import ShapedTypes.Vec
-import qualified ShapedTypes.RPow as R
+import ShapedTypes.LPow (LPow)
+import ShapedTypes.RPow (RPow)
 import qualified ShapedTypes.LPow as L
+import qualified ShapedTypes.RPow as R
 import ShapedTypes.Sized
 import ShapedTypes.Linear
 import ShapedTypes.Scan
 import ShapedTypes.FFT
 
-type RTree = R.Pow Pair
-type LTree = L.Pow Pair
+type RTree = RPow Pair
+type LTree = LPow Pair
 
 main :: IO ()
 
--- main = print (reify t)
+main = print (reify t)
 
-main = go "foo" t
+-- main = go "foo" t
 
 -- main = goSep "foo" 2 t
 
@@ -62,7 +65,7 @@ main = go "foo" t
 
 -- main = goSep "fft-l2-6" 12 (fft :: LTree N6 C -> RTree N6 C)
 
--- main = goSep "fft-r3-4" 4 (fft :: R.Pow (Vec N3) N4 C -> L.Pow (Vec N3) N4 C)
+-- main = goSep "fft-r3-4" 4 (fft :: RPow (Vec N3) N4 C -> LPow (Vec N3) N4 C)
 
 {--------------------------------------------------------------------
     Working examples
@@ -84,7 +87,7 @@ main = go "foo" t
 
 -- t = \ x -> not (not x)
 
-t x y = x || not y
+-- t x y = x || not y
 
 -- t = \ (x :: Int) -> x > 3
 
@@ -96,8 +99,6 @@ t x y = x || not y
 -- t = \ x y -> x > y + 3
 
 -- t = 3.0 :: Double
-
--- t = \ x y -> x || not y
 
 -- t = \ (x :: Int) y -> x > y + 3
 
@@ -117,6 +118,8 @@ t x y = x || not y
 -- t x = if x then 2 else 1 :: Int
 
 -- t x = if x then (2,False) else (1 :: Int,True)
+
+-- t x = if x then 1 :+ 2 else 3 :+ 4 :: Complex Double
 
 -- t = (^) :: Binop Int
 
@@ -139,21 +142,21 @@ t x y = x || not y
 
 -- t = repr :: Pair Int -> (Int,Int)
 
+t = (:#) :: Int -> Int -> Pair Int
+
 -- t = 3 :# 5 :: Pair Int
 
 -- t = \ case u :# v -> u + v :: Int
 
 -- t (x :: Int) = y * y where y = x + x
 
--- t = \ case (R.B ts :: R.Pow Pair N2 Int) -> ts
+-- t = \ case (R.B ts :: RPow Pair N2 Int) -> ts
 
 -- t = \ case (R.B ts :: RTree N2 Int) -> ts
 
 -- t = (1 +) :: Unop Int
 
 -- t = (+ 1) :: Unop Int
-
--- t = (:#) :: Int -> Int -> Pair Int
 
 -- t x = 2 :# (3 * x) :: Pair Int
 
@@ -183,7 +186,11 @@ t x y = x || not y
 
 -- t = size @(LTree N8)
 
--- t = size @(R.Pow (Vec N3) N4)
+-- t = size @(RPow (Vec N3) N4)
+
+-- t = genericSize @Pair
+
+-- t = genericSize @(RPow (Vec N3) N4)
 
 -- t = transpose :: Unop (Pair (Pair Bool))
 
@@ -216,27 +223,93 @@ t x y = x || not y
 
 -- t = evalPoly :: RTree N4 Int -> Int -> Int
 
--- The tree lscan examples (lsums, powers, evalPoly etc) work if I *don't* use
--- genericLscan
-
--- t = fft :: Unop (Pair C)
-
--- -- StateL casts
--- t = lsums :: Vec N12 Int -> (Vec N12 Int, Int)
-
 {--------------------------------------------------------------------
     In progress
 --------------------------------------------------------------------}
 
+#if 0
+class Foo a where
+  foo :: a -> Bool
+--   dummy_Foo :: a
+--   dummy_Foo = undefined
+
+instance Foo Int where
+  foo x = x > 0
+#else
+class Foo a where
+  type Bar a
+  foo :: a -> Bar a
+--   dummy_Foo :: a
+--   dummy_Foo = undefined
+
+instance Foo Int where
+  type Bar Int = Bool
+  foo x = x > 0
+#endif
+
+-- t = foo :: Int -> Bool
+
+-- t = foo (5 :: Int) :: Bool
+
+-- t = repr (3 :# 5 :: Pair Int)
+
+-- t = from1 :: Pair Int -> Rep1 Pair Int
+
+-- t = from1 (3 :# 5 :: Pair Int)
+
 -- t = fft :: Unop (Vec N3 C)
+
+-- t = fft @Pair @Double
+
+-- t = genericFft @(RTree N1) @Double
 
 {--------------------------------------------------------------------
     Broken
 --------------------------------------------------------------------}
 
--- t = fft :: LTree N3 C -> RTree N3 C
 
--- t = fft :: RTree N2 C -> LTree N2 C
+-- The tree lscan examples (lsums, powers, evalPoly etc) work if I *don't* use
+-- genericLscan
+
+-- t = fft :: Unop (Pair C)
+
+-- t = fft :: LTree N1 C -> RTree N1 C
+
+-- t = fft :: RTree N1 C -> LTree N1 C
+
+--     (reifyP
+--        @ (Pow (FFO Pair) 'Z (FFO Pair (Complex Double))
+--           -> Pow (FFO Pair) ('S 'Z) (Complex Double))
+--        (B @ (FFO Pair)
+--           @ ('S 'Z)
+--           @ (Complex Double)
+--           @ 'Z
+--           @~ (<'S 'Z>_N :: 'S 'Z ~# 'S 'Z)))
+
+
+
+-- t :: (RPow (FFO Pair) Z :.: FFO Pair) C -> RPow (FFO Pair) Z (FFO Pair C)
+-- t q = unComp1 q :: RPow (FFO Pair) Z (FFO Pair C)
+
+-- t = unComp1
+
+-- Okay
+
+-- t = genericSize @(RTree N1)
+
+-- t :: (Pair :.: Pair) Int -> Pair (Pair Int)
+-- t = unComp1
+
+-- t :: Pair (Pair Int) -> (Pair :.: Pair) Int
+-- t = Comp1
+
+-- t :: Unop ((Pair :.: Pair) Int)
+-- t = Comp1 . unComp1
+
+-- t :: Unop (Pair (Pair Int)) -> Unop ((Pair :.: Pair) Int)
+-- t f = Comp1 . f . unComp1
+
+----
 
 -- -- Includes unboxed integers. Compiled without INLINE.
 -- t = succI
