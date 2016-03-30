@@ -47,7 +47,7 @@ module ReificationRules.HOS
 
 import Data.Map
 
-import GHC.Types (type (~~),Int(..))  -- 
+import GHC.Types (Int(..))  -- , type (~~)
 import GHC.Prim (Addr#)
 import GHC.CString (unpackCString#)
 
@@ -239,11 +239,11 @@ unI# (I# i) = i
 -- Synonyms for HasRep methods. Using these names postpones the method selector
 -- unfolding built-in rule.
 
--- abst :: HasRep a => Rep a -> a
--- repr :: HasRep a => a -> Rep a
+abst :: HasRep a => Rep a -> a
+repr :: HasRep a => a -> Rep a
 
-abst :: (HasRep a, Rep a ~~ a') => a' -> a
-repr :: (HasRep a, Rep a ~~ a') => a -> a'
+-- abst :: (HasRep a, Rep a ~~ a') => a' -> a
+-- repr :: (HasRep a, Rep a ~~ a') => a -> a'
 
 abst = Rep.abst
 repr = Rep.repr
@@ -251,25 +251,26 @@ repr = Rep.repr
 {-# NOINLINE abst #-}
 {-# NOINLINE repr #-}
 
--- abst' :: HasRep a => Rep a -> a
--- repr' :: HasRep a => a -> Rep a
+abst' :: HasRep a => Rep a -> a
+repr' :: HasRep a => a -> Rep a
 
-abst' :: (HasRep a, Rep a ~~ a') => a' -> a
-repr' :: (HasRep a, Rep a ~~ a') => a -> a'
+-- abst' :: (HasRep a, Rep a ~~ a') => a' -> a
+-- repr' :: (HasRep a, Rep a ~~ a') => a -> a'
 
 abst' = Rep.abst
 repr' = Rep.repr
 
--- I don't know why, but I was unable to find AbstP or ReprP from Plugin.
+abstP :: HasRep a => EP (Rep a -> a)
+reprP :: HasRep a => EP (a -> Rep a)
 
--- abstP :: HasRep a => EP (Rep a -> a)
--- reprP :: HasRep a => EP (a -> Rep a)
-
-abstP :: (HasRep a, Rep a ~~ a') => EP (a' -> a)
-reprP :: (HasRep a, Rep a ~~ a') => EP (a -> a')
+-- abstP :: (HasRep a, Rep a ~~ a') => EP (a' -> a)
+-- reprP :: (HasRep a, Rep a ~~ a') => EP (a -> a')
 
 abstP = constP AbstP
 reprP = constP ReprP
+
+-- TODO: Eliminate abstP & reprP, now that I know how to look up data
+-- constructors.
 
 litE :: HasLit a => a -> EP a
 litE = constP . LitP . toLit
