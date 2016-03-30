@@ -63,8 +63,8 @@ GhcFlags += -fno-specialise
 # Experiment
 GhcFlags += -fno-pre-inlining
 
-# Trace reification
-GhcFlags += -fplugin-opt=$(plugin):trace
+# # Trace reification
+# GhcFlags += -fplugin-opt=$(plugin):trace
 
 compile=time $(ghc) -O -fplugin=$(plugin) $(GhcFlags)
 

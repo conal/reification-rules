@@ -95,14 +95,15 @@ tests = return
   , test 0.5 "lsums-v6" (lsums @(Vec N6) @Int)
   , test 1.5 "powers-rt4" (powers @(RTree N4) @Int)
   , test 1.5 "evalPoly-rt4" (evalPoly @(RTree N4) @Int)
+  , test 1.0 "fft-p" (fft @Pair @Double)
+  , test 2.5 "fft-lt3" (fft @(LTree N3) @Double)
+  , test 2.0 "fft-rt2" (fft @(RTree N2) @Double)
+
+-- Broken
+
+--    , test 0.5 "fft-v3" (fft @(Vec N3) @Double)
 
   ]
-
---   , test 1.0 "fft-p" (fft @Pair @Double)
---   , test 2.5 "fft-lt3" (fft @(LTree N3) @Double)
---   , test 2.0 "fft-rt2" (fft @(RTree N2) @Double)
-
--- I broke FFT reification when I switched from fundep to type family.
 
 {--------------------------------------------------------------------
     Example helpers

@@ -54,9 +54,9 @@ type LTree = LPow Pair
 
 main :: IO ()
 
-main = print (reify t)
+-- main = print (reify t)
 
--- main = go "foo" t
+main = go "foo" t
 
 -- main = goSep "foo" 2 t
 
@@ -142,7 +142,7 @@ main = print (reify t)
 
 -- t = repr :: Pair Int -> (Int,Int)
 
-t = (:#) :: Int -> Int -> Pair Int
+-- t = (:#) :: Int -> Int -> Pair Int
 
 -- t = 3 :# 5 :: Pair Int
 
@@ -257,7 +257,16 @@ instance Foo Int where
 
 -- t = from1 (3 :# 5 :: Pair Int)
 
+-- -- (^) seems to be getting inlined.
 -- t = fft :: Unop (Vec N3 C)
+
+-- t = (^) :: Double -> Int -> Double
+
+-- t = (*) :: Binop C
+
+t = (^ (12 :: Int)) :: Unop C
+
+-- t = dftTraversable @Pair @Double
 
 -- t = fft @Pair @Double
 
@@ -273,7 +282,23 @@ instance Foo Int where
 
 -- t = fft :: Unop (Pair C)
 
--- t = fft :: LTree N1 C -> RTree N1 C
+-- t = fft :: LTree N4 C -> RTree N4 C
+
+-- t = fft @(LTree N4) @Double
+
+-- t = fft @(RTree N4) @Double
+
+-- t :: Int
+-- t = getProduct (Product 3)
+
+-- t :: Product Int -> Int
+-- t = getProduct
+
+-- t :: Int -> Product Int
+-- t = Product
+
+-- t :: Product Int
+-- t = Product 3
 
 -- t = fft :: RTree N1 C -> LTree N1 C
 
