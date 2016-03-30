@@ -27,10 +27,10 @@
 
 module ReificationRules.Plugin (plugin) where
 
-import Control.Arrow (first)
+import Control.Arrow (first,(***))
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard)
-import Data.Maybe (fromMaybe,isJust)
+import Data.Maybe (fromMaybe,isJust,catMaybes)
 import Data.List (isPrefixOf,isSuffixOf,elemIndex)
 import Data.Char (toLower)
 import qualified Data.Map as M
@@ -122,7 +122,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
  where
    go :: ReExpr
    go = \ case 
-     -- e | dtrace "reify go:" (ppr e) False -> undefined
+     e | dtrace "reify go:" (ppr e) False -> undefined
      Trying("lambda")
      Lam x e | not (isTyVar x) ->
        -- lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
@@ -283,7 +283,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
              , Just reV <- tryReify v
        ->
         Just (varApps appV [dom,ran] [reU,reV])
-     _e -> pprTrace "reifyP" (text "Unhandled:" <+> ppr _e) $
+     _e -> -- pprTrace "reifyP" (text "Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
    -- v --> ("v'", eval v')
@@ -622,17 +622,14 @@ stdMethMap = M.fromList $
     Plugin installation
 --------------------------------------------------------------------}
 
-mkReifyRule :: [CommandLineOption] -> CoreM (ModGuts -> CoreRule)
-mkReifyRule opts = reRule <$> mkReifyEnv opts
- where
-   reRule :: ReifyEnv -> ModGuts -> CoreRule
-   reRule ops guts =
-     BuiltinRule { ru_name  = fsLit "reifyP"
-                 , ru_fn    = varName (reifyV ops)
-                 , ru_nargs = 2  -- including type arg
-                 , ru_try   = \ dflags inScope _fn [_ty,arg] ->
-                                 reify ops guts dflags inScope arg
-                 }
+reifyRule :: ReifyEnv -> ModGuts -> CoreRule
+reifyRule env guts =
+  BuiltinRule { ru_name  = fsLit "reifyP"
+              , ru_fn    = varName (reifyV env)
+              , ru_nargs = 2  -- including type arg
+              , ru_try   = \ dflags inScope _fn [_ty,arg] ->
+                              reify env guts dflags inScope arg
+              }
 
 plugin :: Plugin
 plugin = defaultPlugin { installCoreToDos = install }
@@ -648,11 +645,12 @@ install opts todos =
         return todos
       else
        do reinitializeGlobals
-          rr <- mkReifyRule opts
+          env <- mkReifyEnv opts
           -- For now, just insert the rule.
           -- TODO: add "reify_" bindings and maybe rules.
-          let addRule guts = pure (on_mg_rules (rr guts :) guts)
-          return $   CoreDoPluginPass "Reify insert rule" addRule
+          let addRule guts = pure (on_mg_rules (reifyRule env guts :) guts)
+          return $   CoreDoPluginPass "Add reify definitions" (return . addReifyRules env)
+                   : CoreDoPluginPass "Reify insert rule" addRule
                    : CoreDoSimplify 2 mode
                    : todos
  where
@@ -665,6 +663,59 @@ install opts todos =
                     , sm_eta_expand = False -- ??
                     , sm_case_case  = True  -- important
                     }
+
+-- type PluginPass = ModGuts -> CoreM ModGuts
+
+addReifyRules :: ReifyEnv -> Unop ModGuts
+addReifyRules (ReifyEnv { .. }) guts = on_mg_rules (++ rules) guts
+ where
+   rules = catMaybes (reifyDefRule <$> mg_binds guts)
+   reifyDefRule :: CoreBind -> Maybe CoreRule
+   reifyDefRule (Rec _) = Nothing
+   reifyDefRule (NonRec v rhs) = rule v <$> collectOuter rhs
+   rule :: Id -> ([Var],CoreExpr) -> CoreRule
+   rule v (vs,rhs) = mkRule (mg_module guts)
+                            False                             -- auto
+                            False                             -- local
+                            (fsLit ("reify " ++ uqVarName v)) -- name
+                            AlwaysActive                      -- act
+                            (varName reifyV)                  -- fn
+                            vs                                -- bndrs
+                            args                              -- args
+                            rhs                               -- rhs
+    where
+      args = [Type (exprType arg),arg]
+       where
+         arg = mkCoreApps (Var v) (varToCoreExpr <$> vs)
+   collectOuter :: CoreExpr -> Maybe ([Var],CoreExpr)
+   collectOuter e -- | pprTrace "collectOuter" (ppr e) False = undefined
+                  | isTyCoDictArg e = Nothing
+                  | otherwise       = 
+     case (exprType e, e) of
+       (_, Lam v body) | isTyCoVar v || isDictTy (idType v) ->
+         ((v:) *** Lam v) <$> collectOuter body
+       (FunTy dom _, _) | not (reifiableType dom) -> etaRetry
+       (ForAllTy (Named {}) _,_)          -> pprTrace "collectOuter ForAllTy" empty $
+                                             etaRetry
+       (ty,_)           | reifiableExpr e -> Just ([], varApps reifyV [ty] [e])
+                        | otherwise       -> Nothing
+    where
+      etaRetry = collectOuter (etaExpand 1 e)
+
+
+--    go = undefined
+
+--    reifyDefRule _ = Nothing
+
+-- reifiedBind :: Unop CoreBind
+-- reifiedBind (NonRec v rhs) = NonRec v' rhs
+--  where
+--    v' = uniqAway
+
+-- reifiedBind b = b
+
+-- addReifyDefs = return
+
 
 type PrimFun = Type -> Id -> [Type] -> Maybe CoreExpr
 
