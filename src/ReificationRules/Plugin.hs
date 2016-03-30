@@ -10,8 +10,8 @@
 
 {-# OPTIONS_GHC -Wall #-}
 
--- {-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
--- {-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
+{-# OPTIONS_GHC -fno-warn-unused-imports #-} -- TEMP
+{-# OPTIONS_GHC -fno-warn-unused-binds   #-} -- TEMP
 
 ----------------------------------------------------------------------
 -- |
@@ -49,9 +49,10 @@ import TcType (isIntTy, isDoubleTy)
 import FamInstEnv (normaliseType)
 -- import TcType (isIntTy)
 import TyCoRep                          -- TODO: explicit imports
+import Unique (mkBuiltinUnique)
 
 import ReificationRules.Misc (Unop,Binop)
-import ReificationRules.BuildDictionary (buildDictionary,mkEqBox)
+import ReificationRules.BuildDictionary (buildDictionary{-,mkEqBox-})
 import ReificationRules.Simplify (simplifyE)
 
 {--------------------------------------------------------------------
@@ -60,31 +61,33 @@ import ReificationRules.Simplify (simplifyE)
 
 -- Information needed for reification. We construct this info in
 -- CoreM and use it in the reify rule, which must be pure.
-data ReifyEnv = ReifyEnv { appV       :: Id
-                         , lamV       :: Id
-                         , letV       :: Id
-                         , letPairV   :: Id
-                         , reifyV     :: Id
-                         , evalV      :: Id
-                         , primFun    :: PrimFun
-                         , isPrimApp  :: CoreExpr -> Bool
-                         , abstV      :: Id
-                         , reprV      :: Id
-                         , abst'V     :: Id
-                         , repr'V     :: Id
-                         , abstPV     :: Id
-                         , reprPV     :: Id
-                         , unIV       :: Id
-                         , idV        :: Id
-                         , composeV   :: Id
-                         , prePostV   :: Id
-                         , ifPV       :: Id
-                         , ifCatTy    :: Type -> Type
-                         , epTy       :: Type
-                         , hasRepMeth :: HasRepMeth
-                         , hasLit     :: HasLit
-                         , tracing    :: Bool
-                         , hsc_env    :: HscEnv
+data ReifyEnv = ReifyEnv { appV             :: Id
+                         , lamV             :: Id
+                         , letV             :: Id
+                         , letPairV         :: Id
+                         , reifyV           :: Id
+                         , evalV            :: Id
+                         , primFun          :: PrimFun
+                         , isPrimApp        :: CoreExpr -> Bool
+                         , abstV            :: Id
+                         , reprV            :: Id
+                         , abst'V           :: Id
+                         , repr'V           :: Id
+                         , abstPV           :: Id
+                         , reprPV           :: Id
+                         , unIV             :: Id
+                         , idV              :: Id
+                         , composeV         :: Id
+                         , prePostV         :: Id
+                         , ifPV             :: Id
+                         , ifCatTy          :: Type -> Type
+                         , epTy             :: Type
+                         , repTc            :: TyCon
+                         , hasRepMeth       :: HasRepMeth
+                         , hasRepFromAbstCo :: Coercion -> CoreExpr
+                         , hasLit           :: HasLit
+                         , tracing          :: Bool
+                         , hsc_env          :: HscEnv
                          }
 
 -- TODO: Perhaps drop reifyV, since it's in the rule
@@ -150,6 +153,9 @@ reify (ReifyEnv {..}) guts dflags inScope =
                    (tryReify rhs)
                    (tryReify (subst1 x evalY body))
 #endif
+     Trying("case-default")
+     Case _scrut (isDeadBinder -> True) _rhsTy [(DEFAULT,[],rhs)] ->
+       tryReify rhs
      Trying("if-then-else")
      e@(Case scrut wild rhsTy [ (DataAlt false, [], falseVal)
                               , (DataAlt true , [],  trueVal) ])
@@ -210,7 +216,10 @@ reify (ReifyEnv {..}) guts dflags inScope =
 #if 1
      -- Can these two ever help? They did, I think.
      Trying("recast scrutinee")
-     Case (Cast e co) wild ty alts | Just scrut' <- (`App` e) <$> recast co ->
+     Case scrut@(Cast e co) wild ty alts
+       | reifiableExpr scrut
+       , Just scrut' <- recast e co ->
+       pprTrace "recast scrutinee:" (ppr scrut $$ "scrut':" <+> ppr scrut') $
        tryReify (Case scrut' wild ty alts)
      Trying("unfold scrutinee")
      Case scrut v altsTy alts
@@ -219,6 +228,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
        -> tryReify $ Case scrut' v altsTy alts
 #endif
 #if 1
+     -- Still useful?
      Trying("case-of-case")
      -- Give the simplifier another shot
      e@(Case _scrut@(Case {}) _ _ _) -> -- Nothing
@@ -231,12 +241,12 @@ reify (ReifyEnv {..}) guts dflags inScope =
          -- pprTrace "cast-of-reify" (ppr nco) $
          (`Cast` co') <$> tryReify e
      Trying("recast")
-     Cast e (recast -> Just f) -> -- pprTrace "recast" empty $
-                                  tryReify (App f e)
-     Trying("unfold castee")
-     -- Does this one ever fire anymore?
-     Cast (unfoldMaybe -> Just e') co -> -- pprTrace "unfold castee" empty $
-                                         tryReify $ Cast e' co
+     Cast e co | Just e' <- recast e co -> go e' -- tryReify
+--      -- Now done in recast
+--      Trying("unfold castee")
+--      -- Does this one ever fire anymore?
+--      Cast (unfoldMaybe -> Just e') co -> -- pprTrace "unfold castee" empty $
+--                                          tryReify $ Cast e' co
      Trying("repMeth")
      (repMeth -> Just e) -> Just e
      Trying("literal")
@@ -298,7 +308,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    literal :: ReExpr
    literal = hasLit dflags guts inScope
    repMeth :: ReExpr
-   repMeth (collectArgs -> (Var v, args@(length -> 4))) =
+   repMeth (collectArgs -> (Var v, args@(length -> 2))) =  -- 4
      if | v == abstV -> wrap abstPV
         | v == reprV -> wrap reprPV
         | otherwise  -> Nothing
@@ -337,34 +347,66 @@ reify (ReifyEnv {..}) guts dflags inScope =
          e' = traceUnop ("simplify " ++ show inlining ++ ", pass " ++ show n)
               (simplifyE dflags inlining) e
 #endif
-   -- Convert a coercion (being used in a cast) to an equivalent Core function
-   -- to apply. I considered handling casts one layer at a time
-   -- (non-recursively), leaving behind simpler casts, but in at least some
-   -- cases, I expect that GHC's simplifier would undo my work, causing an
-   -- infinite simplification chain.
-   recast :: Coercion -> Maybe CoreExpr
-   recast co0 | reifiableType (pFst (coercionKind co0)) = recast' co0
-              | otherwise                               = Nothing
+   -- Convert a cast into a more reifiable form (but don't reify)
+   recast :: CoreExpr -> Coercion -> Maybe CoreExpr
+   -- recast _ co | pprTrace "recast" (ppr co <+> dcolon <+> ppr (coercionType co)) False = undefined
+   -- If we have a nominal(able) coercion, let another reify pass handle it.
+   -- Importantly, 'go' above tries this case before recast. Thus, if we see a
+   -- nominal coercion here, we've already made progress.
+   -- I'm not really sure about this argument, so take care!
+   recast e co | Just _ <- setNominalRole_maybe co = Just (mkCast e co)
+   recast e (Refl {}) = Just e  -- or leave for the simplifier
+   recast e (FunCo _r domCo ranCo) =
+     Just (Lam x (mkCast (e `App` mkCast (Var x) (mkSymCo domCo)) ranCo))
+     -- TODO: Will the simplifier move the outer mkCast back out through the Lam
+     -- to make another FunCo? If so, rethink.
+     -- Lam x <$> recast (e `App` mkCast (Var x) (mkSymCo domCo)) ranCo
     where
-      recast' :: Coercion -> Maybe CoreExpr
-      recast' co | pprTrace "recast'" (ppr co) False = undefined
-      recast' (Refl _r ty) = Just (unfolded (varApps idV [ty] []))
-      recast' (FunCo _r domCo ranCo) =
-        liftA2 mkPrePost (recast' (mkSymCo domCo)) (recast' ranCo) -- co/contravariant
-      recast' (TransCo inner outer) = pprTrace "TransCo" empty $ -- order?
-                                      mkCompose <$> recast' outer <*> recast' inner
-      recast' co@(       AxiomInstCo {} ) = recastRep reprV pFst co
-      recast' co@(SymCo (AxiomInstCo {})) = recastRep abstV pSnd co
-      recast' (SubCo co) = recast' co  -- okay?
-      recast' (AppCo fun arg)
-        | pprTrace "recast' AppCo:" (ppr (fun,arg)) False = undefined
-      recast' co = pprTrace ("recast: unhandled " ++ coercionTag co ++ " coercion:")
-                     (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
-      recastRep v get co
-        | Just f <- hrMeth (get (coercionKind co)) = Just (f v)
-        | otherwise = pprTrace "recastRep failure:" (ppr (get (coercionKind co)))
-                      Nothing
+      x = freshId (exprFreeVars e) "x" (pSnd (coercionKind domCo))
+      -- TODO: take care with the directions
+      -- TODO: drop prePostV
+   recast e co
+     | dom `eqType` repTy ran =
+         Just $ varApps abstV [ran] [hasRepFromAbstCo co,e]
+     | ran `eqType` repTy dom =
+         Just $ varApps reprV [dom] [hasRepFromAbstCo (mkSymCo co),e]
+     | AxiomInstCo {} <- co =
+         -- co :: dom ~#R ran for a newtype instance dom and its representation ran.
+         -- repCo :: Rep dom ~# ran
+         let repCo = UnivCo UnsafeCoerceProv Representational (repTy dom) ran in
+           -- pprTrace "recast AxiomInstCo:" (ppr repCo) $
+           Just $ Cast (mkCast e (TransCo co (mkSymCo (mkSubCo repCo)))) repCo
+           -- Outer Cast instead of mkCast to avoid optimization.
+     | SymCo (AxiomInstCo {}) <- co =
+         -- co :: dom ~#R ran for a newtype instance ran
+         -- repCo :: Rep ran ~# dom
+         let repCo = UnivCo UnsafeCoerceProv Representational (repTy ran) dom in
+           Just $ Cast (mkCast e (mkSymCo repCo)) (TransCo (mkSubCo repCo) co)
+           -- recast (mkCast e (mkSymCo repCo)) (TransCo (mkSubCo repCo) co)
+           -- 
+           -- EXPERIMENT: return just a cast. I may have to change the receiver
+           -- to use 'go' instead of 'tryReify', to avoid having the simplifier
+           -- undo our work.
+           -- Just (Cast (mkCast e (mkSymCo repCo)) (TransCo (mkSubCo repCo) co))
+    where
+      Pair dom ran = coercionKind co
+--    recast (AppCo fun arg)
+--      | pprTrace "recast AppCo:" (ppr (fun,arg)) False = undefined
+     -- Does this one ever fire anymore?
+   -- TransCo must come after the abst (dom == Rep ran) and repr (ran == Rep
+   -- dom) cases, since the AxiomInstCo (newtype) cases create transitive
+   -- coercions having those shapes.
+   recast e (TransCo inner outer) = -- Use at least one recursive recast so
+                                    -- the simplifier doesn't recombine.
+                                    -- pprTrace "TransCo" empty $ -- order?
+                                    recast (mkCast e inner) outer
+   recast (unfoldMaybe -> Just e') co = -- pprTrace "unfold castee" empty $
+                                        Just $ Cast e' co
+   recast _ co = pprTrace ("recast: unhandled " ++ coercionTag co ++ " coercion:")
+                   (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
    -- TODO: Check the type, in case the coercion is not
+   repTy :: Unop Type
+   repTy t = mkTyConApp repTc [t]
    -- Rep a -> a or a -> Rep a.
    unfolded :: Unop CoreExpr
    unfolded e = fromMaybe e (unfoldMaybe e)               
@@ -686,6 +728,22 @@ mkReifyEnv opts = do
       circuitTy = mkTyConApp circuitTc []
       ifCatTy t = mkTyConApp ifCatTc [circuitTy,t]
       tracing   = "trace" `elem` opts
+      
+      -- New ones
+      idAt t = Var idV `App` Type t     -- varApps idV [t] []
+      [hasRepDc] = tyConDataCons hasRepTc
+      mkHasRep :: Binop CoreExpr
+      mkHasRep repr abst = conApps hasRepDc [ty] [repr,abst]
+       where
+         FunTy ty _ = exprType repr
+      -- co :: Rep t ~#R t, i.e., abst. repr comes first in the dictionary.
+      hasRepFromAbstCo co = mkHasRep (caster (mkSymCo co)) (caster co)
+       where
+         Pair dom ran = coercionKind co
+      caster :: Coercion -> CoreExpr
+      caster co@(pFst . coercionKind -> dom) =
+        mkCast (idAt dom) (mkFunCo Representational (mkRepReflCo dom) co)
+
   return (ReifyEnv { .. })
 
 --   primTc     <- findTc "ReificationRules.Prim" "Prim"
@@ -696,27 +754,24 @@ mkReifyEnv opts = do
 -- * I'm assuming that it's safe to reuse x's unique here, since x is
 -- eliminated. If not, use uniqAway x and then setVarType.
 
--- The next few functions extract types and tycons from the types of looked-up
--- identifiers. I'd rather learn how to look up the types and tycons directly,
--- as I do with (value) identifiers.
-
 type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
 hasRepMethodM :: TyCon -> TyCon -> Id -> CoreM HasRepMeth
-hasRepMethodM hasRepTc repTc idV =
+hasRepMethodM hasRepTc repTc _idV =
   do hscEnv <- getHscEnv
-     eps    <- liftIO (hscEPS hscEnv)
+     _eps   <- liftIO (hscEPS hscEnv)
      return $ \ dflags guts inScope ty ->
        let repTy = mkTyConApp repTc [ty]
-           newtypeRep :: Maybe (CoreExpr,(Coercion,Type))
-#if 0
-           newtypeRep = Nothing
+#if 1
+           newtypeDict :: Maybe CoreExpr
+           newtypeDict = Nothing
 #else
-           newtypeRep =
+           newtypeDict :: Maybe (CoreExpr,(Coercion,Type))
+           newtypeDict =
              do (tc,tyArgs) <- splitTyConApp_maybe ty
                 (tvs,newtyRhs,_coax) <- unwrapNewTyCon_maybe tc
                 -- TODO: refactor to isolate the Maybe stuff.
-                -- pprTrace "newtypeRep. coax:" (ppr _coax) (return ())
+                -- pprTrace "newtypeDict. coax:" (ppr _coax) (return ())
                 let ty'   = substTy (zipTvSubst tvs tyArgs) newtyRhs
                     [hasRepDc] = tyConDataCons hasRepTc
                     mkIdFun t = varApps idV [t] []
@@ -731,19 +786,39 @@ hasRepMethodM hasRepTc repTc idV =
                     dict = conApps hasRepDc [ty] [repr,abst]
                 return (dict,(repNtIs,ty'))
 #endif
-           findRep :: Maybe (CoreExpr,(Coercion,Type))
-           findRep =
+           findDict :: Maybe CoreExpr
+#if 1
+           findDict = buildDictionary hscEnv dflags guts inScope
+                        (mkTyConApp hasRepTc [ty])
+           mkMethApp dict =
+             -- pprTrace "hasRepMeth" (ppr ty <+> text "-->" <+> ppr dict) $
+             \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
+                       varApps meth [ty] [dict]
+#else
+           findDict =
              (, normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
                   Nominal repTy )
-             <$> buildDictionary hscEnv dflags guts inScope
-                   (mkTyConApp hasRepTc [ty])
+             <$> 
            mkMethApp (dict,(co,ty')) =
-             pprTrace "hasRepMeth" (ppr ty <+> text "-->" <+> ppr (dict,co,ty')) $
+             -- pprTrace "hasRepMeth" (ppr ty <+> text "-->" <+> ppr (dict,co,ty')) $
              \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
                        varApps meth [ty,ty'] [dict,mkEqBox co]
+#endif
        in
           -- Real dictionary or synthesize
-          mkMethApp <$> (findRep <|> newtypeRep)
+          mkMethApp <$> (findDict <|> newtypeDict)
+
+
+-- asNewtype :: Type -> Maybe (Type, DictExpr, Coercion)
+-- asNewtype ty =
+
+-- -- If the given type is an application of a newtype, yield the representation
+-- -- type and the coercion from newtype to representation type.
+-- unwrapNewType :: Type -> Maybe Type
+-- unwrapNewType ty =
+--   do (tc,tyArgs)          <- splitTyConApp_maybe ty
+--      (tvs,newtyRhs,_coax) <- unwrapNewTyCon_maybe tc
+--      return (substTy (zipTvSubst tvs tyArgs) newtyRhs)
 
 -- <Sum a>_R -> Data.Monoid.N:Sum[0]
 --               (Sub (Sym (Circat.Rep.D:R:RepSum[0] <a>_N)))
@@ -874,10 +949,17 @@ stringExpr = Lit . mkMachString
 varNameExpr :: Id -> CoreExpr
 varNameExpr = stringExpr . uniqVarName
 
+pattern FunTy :: Type -> Type -> Type
+pattern FunTy dom ran <- (splitFunTy_maybe -> Just (dom,ran))
+ where FunTy = mkFunTy
+
+-- TODO: Replace explicit uses of splitFunTy_maybe
+
+-- TODO: Look for other useful pattern synonyms
+
 pattern FunCo :: Role -> Coercion -> Coercion -> Coercion
 pattern FunCo r dom ran <- TyConAppCo r (isFunTyCon -> True) [dom,ran]
- where
-   FunCo r dom ran = TyConAppCo r funTyCon [dom,ran]
+ where FunCo = mkFunCo
 
 onCaseRhs :: Type -> Unop (Unop CoreExpr)
 onCaseRhs altsTy' f (Case scrut v _ alts) =
@@ -932,3 +1014,9 @@ onExprHead h = (fmap.fmap) simpleOptExpr $
    go _ _                = Nothing
 
 -- The simpleOptExpr here helps keep simplification going.
+
+-- Identifier not occurring in a given variable set
+freshId :: VarSet -> String -> Type -> Id
+freshId used nm ty =
+  uniqAway (mkInScopeSet used) $
+  mkSysLocal (fsLit nm) (mkBuiltinUnique 17) ty
