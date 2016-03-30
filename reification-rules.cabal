@@ -54,20 +54,8 @@ Test-Suite test-reify
   default-language: Haskell98
   hs-Source-Dirs:   test
   test-module:      Suite
-  Build-Depends:    base<5
-                  , containers
-                  , ghc >= 7.10.3
-                  , ghc-prim
-                  , constraints
-                  , transformers >= 0.4
-                  , ty >= 0.1.5
-                  , hermit >= 1.0.0.1
-                  , circat
-                  , Cabal >= 1.10
-                  , reification-rules
-                  , shaped-types
-
-                  -- TODO: trim depends
+  Build-Depends:    base<5, Cabal >= 1.10
+                  , circat, reification-rules, shaped-types
 
   ghc-options:      -O
 
