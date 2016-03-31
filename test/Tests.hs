@@ -264,13 +264,21 @@ instance Foo Int where
 
 -- t = (*) :: Binop C
 
-t = (^ (12 :: Int)) :: Unop C
+-- t = (^ (7 :: Int)) :: Unop C
 
 -- t = dftTraversable @Pair @Double
 
 -- t = fft @Pair @Double
 
 -- t = genericFft @(RTree N1) @Double
+
+-- t = False
+
+-- t = ()
+
+t (x :: U1 Bool) = case x of { U1 -> () }
+
+-- t (x :: Par1 Bool) = case x of { Par1 b -> b }
 
 {--------------------------------------------------------------------
     Broken
