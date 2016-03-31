@@ -23,6 +23,8 @@ GhcFlags += -fforce-recomp
 
 # GhcFlags += -ddump-simpl
 
+# GhcFlags += -frule-check reify
+
 # GhcFlags += -ddump-simpl-iterations
 
 # GhcFlags += -dshow-passes
@@ -63,12 +65,15 @@ GhcFlags += -fno-specialise
 # Experiment
 GhcFlags += -fno-pre-inlining
 
-# # Trace reification
-# GhcFlags += -fplugin-opt=$(plugin):trace
+# Trace reification
+GhcFlags += -fplugin-opt=$(plugin):trace
 
 compile=time $(ghc) -O -fplugin=$(plugin) $(GhcFlags)
 
 Tests: ../dist $(circat)/dist $(shaped)/dist Tests.hs Makefile
+	$(compile) $@
+
+ReTest: ../dist $(circat)/dist $(shaped)/dist Tests.hs Makefile
 	$(compile) $@
 
 # RuleTest: ../dist RuleTest.hs Makefile
