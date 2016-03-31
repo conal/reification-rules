@@ -260,6 +260,13 @@ repr' :: HasRep a => a -> Rep a
 abst' = Rep.abst
 repr' = Rep.repr
 
+{-# INLINE abst' #-}
+{-# INLINE repr' #-}
+
+-- TODO: drop an abst/repr pair, now that I'm using the simpler signatures
+-- consistently. I can't stop the Rep.abst and Rep.repr method selectors from
+-- inlining, so use a NOINLINE synonym as the recognized prim in Plugin.
+
 abstP :: HasRep a => EP (Rep a -> a)
 reprP :: HasRep a => EP (a -> Rep a)
 
