@@ -27,7 +27,7 @@
 
 module ReificationRules.Plugin (plugin) where
 
-import Control.Arrow (first,(***))
+import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard)
 import Data.Maybe (fromMaybe,isJust,catMaybes)
@@ -159,9 +159,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("if-then-else")
      e@(Case scrut wild rhsTy [ (DataAlt false, [], falseVal)
                               , (DataAlt true , [],  trueVal) ])
-       | false == falseDataCon, true == trueDataCon ->
+       | false == falseDataCon, true == trueDataCon
+       , Just ifDict <- buildDictMaybe (ifCatTy rhsTy)
+       ->
          if isDeadBinder wild then
-           (varApps ifPV [rhsTy] . (buildDict (ifCatTy rhsTy) :))
+           (varApps ifPV [rhsTy] . (ifDict :))
              <$> mapM tryReify [scrut,trueVal,falseVal]
          else
            pprPanic "reify - case with live wild var (not yet handled)" (ppr e)
@@ -212,7 +214,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
        | not (alreadyAbstReprd scrut)
        , Just meth <- hrMeth (exprType scrut)
        -> tryReify $ -- go  -- Less chatty with go
-          Case (meth abst'V `App` (meth reprV `App` scrut)) v altsTy alts
+          Case (simplE True (meth abst'V) `App` (meth reprV `App` scrut)) v altsTy alts
 #if 1
      -- Can these two ever help? They did, I think.
      Trying("recast scrutinee")
@@ -259,6 +261,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
        -> do tryReify $
                mkLams binds $
                  meth abstV `App` (simplE True (meth repr'V `App` body))
+             -- TODO: Try simpleE on just (meth repr'V), not body.
      Trying("primitive")
      -- Primitive functions
      e@(collectTysDictsArgs -> (Var v, tys, _dicts))
@@ -422,9 +425,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- onInlineFail v =
    --   pprTrace "onInlineFail idDetails" (ppr v <+> colon <+> ppr (idDetails v))
    --   Nothing
+   buildDictMaybe :: Type -> Maybe CoreExpr
+   buildDictMaybe = buildDictionary hsc_env dflags guts inScope
    buildDict :: Type -> CoreExpr
    buildDict ty = fromMaybe (pprPanic "reify - couldn't build dictionary for" (ppr ty)) $
-                  buildDictionary hsc_env dflags guts inScope ty
+                  buildDictMaybe ty
    -- Tracing
    dtrace :: String -> SDoc -> a -> a
    dtrace str doc | tracing   = pprTrace str doc
@@ -636,7 +641,7 @@ plugin = defaultPlugin { installCoreToDos = install }
 
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 install opts todos =
-  do -- pprTrace "Reify install" empty (return ())
+  do pprTrace ("Reify install " ++ show opts) empty (return ())
      dflags <- getDynFlags
      -- Unfortunately, the plugin doesn't work in GHCi. Until I can fix it,
      -- disable under GHCi, so we can at least type-check conveniently.
@@ -649,8 +654,8 @@ install opts todos =
           -- For now, just insert the rule.
           -- TODO: add "reify_" bindings and maybe rules.
           let addRule guts = pure (on_mg_rules (reifyRule env guts :) guts)
-          return $   CoreDoPluginPass "Add reify definitions" (return . addReifyRules env)
-                   : CoreDoPluginPass "Reify insert rule" addRule
+          return $   CoreDoPluginPass "Reify insert rule" addRule
+                   : CoreDoPluginPass "Add reify definitions" (return . addReifyRules env)
                    : CoreDoSimplify 2 mode
                    : todos
  where
@@ -667,12 +672,17 @@ install opts todos =
 -- type PluginPass = ModGuts -> CoreM ModGuts
 
 addReifyRules :: ReifyEnv -> Unop ModGuts
-addReifyRules (ReifyEnv { .. }) guts = on_mg_rules (++ rules) guts
+addReifyRules (ReifyEnv { .. }) guts = --- pprTrace "addReifyRules new rules" (ppr rules) $
+                                       on_mg_rules (++ rules) guts
  where
    rules = catMaybes (reifyDefRule <$> mg_binds guts)
    reifyDefRule :: CoreBind -> Maybe CoreRule
    reifyDefRule (Rec _) = Nothing
-   reifyDefRule (NonRec v rhs) = rule v <$> collectOuter rhs
+   reifyDefRule (NonRec v rhs) = -- pprTrace "reifyDefRule" (ppr v) $
+                                 -- pprTrace "rule" (ppr mbRule) $
+                                 mbRule
+    where
+      mbRule = rule v <$> collectOuter rhs
    rule :: Id -> ([Var],CoreExpr) -> CoreRule
    rule v (vs,rhs) = mkRule (mg_module guts)
                             False                             -- auto
@@ -683,38 +693,30 @@ addReifyRules (ReifyEnv { .. }) guts = on_mg_rules (++ rules) guts
                             vs                                -- bndrs
                             args                              -- args
                             rhs                               -- rhs
-    where
-      args = [Type (exprType arg),arg]
-       where
-         arg = mkCoreApps (Var v) (varToCoreExpr <$> vs)
+     where
+       args = [Type (exprType arg),arg]
+       arg = mkCoreApps (Var v) (varToCoreExpr <$> vs)
    collectOuter :: CoreExpr -> Maybe ([Var],CoreExpr)
-   collectOuter e -- | pprTrace "collectOuter" (ppr e) False = undefined
-                  | isTyCoDictArg e = Nothing
+   collectOuter e -- | pprTrace "collectOuter" (ppr e <+> dcolon <+> ppr (exprType e)) False = undefined
+                  | isTyCoDictArg e = -- pprTrace "collectOuter isTyCoDictArg" empty $
+                                      Nothing
                   | otherwise       = 
      case (exprType e, e) of
        (_, Lam v body) | isTyCoVar v || isDictTy (idType v) ->
-         ((v:) *** Lam v) <$> collectOuter body
-       (FunTy dom _, _) | not (reifiableType dom) -> etaRetry
-       (ForAllTy (Named {}) _,_)          -> pprTrace "collectOuter ForAllTy" empty $
+         -- pprTrace "collectOuter Lam" empty $
+         first (v:) <$> collectOuter body
+       (FunTy dom _, _) | not (reifiableType dom), not (isLam e) -> -- pprTrace "collectOuter non-re domain" (ppr dom) $
+                                                                    etaRetry
+       (ForAllTy (Named {}) _,_)          -> -- pprTrace "collectOuter ForAllTy" empty $
                                              etaRetry
-       (ty,_)           | reifiableExpr e -> Just ([], varApps reifyV [ty] [e])
-                        | otherwise       -> Nothing
+       (ty,_)           | reifiableExpr e -> -- pprTrace "collectOuter done" empty $
+                                             Just ([], varApps reifyV [ty] [e])
+                        | otherwise       -> -- pprTrace "collectOuter bailing:" empty $
+                                             Nothing
     where
       etaRetry = collectOuter (etaExpand 1 e)
-
-
---    go = undefined
-
---    reifyDefRule _ = Nothing
-
--- reifiedBind :: Unop CoreBind
--- reifiedBind (NonRec v rhs) = NonRec v' rhs
---  where
---    v' = uniqAway
-
--- reifiedBind b = b
-
--- addReifyDefs = return
+      isLam (Lam {}) = True
+      isLam _        = False
 
 
 type PrimFun = Type -> Id -> [Type] -> Maybe CoreExpr
