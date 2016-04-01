@@ -44,6 +44,7 @@ import DynamicLoading
 -- import Kind (isLiftedTypeKind)
 import MkId (mkDictSelRhs)
 import Pair (Pair(..))
+import PrelNames (leftDataConName,rightDataConName)
 import Type (coreView)
 import TcType (isIntTy, isDoubleTy)
 import FamInstEnv (normaliseType)
@@ -115,14 +116,13 @@ type ReExpr = Rewrite CoreExpr
 
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
 reify (ReifyEnv {..}) guts dflags inScope =
-  -- pprTrace "reify rule" empty $
   traceRewrite "reifyP" $
   lintReExpr $
   go
  where
    go :: ReExpr
    go = \ case 
-     e | dtrace "reify go:" (ppr e) False -> undefined
+     -- e | dtrace "reify go:" (ppr e) False -> undefined
      Trying("lambda")
      Lam x e | not (isTyVar x) ->
        -- lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
@@ -177,10 +177,18 @@ reify (ReifyEnv {..}) guts dflags inScope =
             pprPanic "reify - case with live wild var (not yet handled)" (ppr e)
           -- TODO: handle live wild var.
           tryReify rhs
-     Trying("pair scrutinee")
+     Trying("sum scrutinee")
+     Case _scrut _wild _rhsTy [ (DataAlt left , [_],  _leftVal)
+                              , (DataAlt right, [_], _rightVal) ]
+       | dataConName left  ==  leftDataConName
+       , dataConName right == rightDataConName ->
+         -- TODO: reify
+         dtrace "reify sum (not yet implemented)" empty $
+         Nothing
+     Trying("product scrutinee")
      e@(Case scrut wild rhsTy [(DataAlt dc, [a,b], rhs)])
          | isBoxedTupleTyCon (dataConTyCon dc)
-         , reifiableExpr rhs ->
+        , reifiableExpr rhs ->
        do -- To start, require v to be unused. Later, extend.
           unless (isDeadBinder wild) $
             pprPanic "reify - case with live wild var (not yet handled)" (ppr e)
@@ -204,7 +212,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
        tryReify $
          mkCoreLet (NonRec n (App (Var unIV) scrut)) rhs
 --          mkCoreLets [ (NonRec w' scrut)
---                     , (NonRec n ({-mkCoreApp (text "reifyP") -} App (Var unIV) (Var w'))) ]
+--                     , (NonRec n ({-mkCoreApp "reifyP" -} App (Var unIV) (Var w'))) ]
 --            rhs
       where
         w' = zapIdOccInfo w
@@ -221,11 +229,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Case scrut@(Cast e co) wild ty alts
        | reifiableExpr scrut
        , Just scrut' <- recast e co ->
-       pprTrace "recast scrutinee:" (ppr scrut $$ "scrut':" <+> ppr scrut') $
+       dtrace "recast scrutinee:" (ppr scrut $$ "scrut':" <+> ppr scrut') $
        tryReify (Case scrut' wild ty alts)
      Trying("unfold scrutinee")
      Case scrut v altsTy alts
-       -- | pprTrace ("unfold scrutinee -- trying") (ppr scrut) False -> undefined
+       | dtrace ("unfold scrutinee -- trying") (ppr scrut) False -> undefined
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
 #endif
@@ -234,20 +242,20 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("case-of-case")
      -- Give the simplifier another shot
      e@(Case _scrut@(Case {}) _ _ _) -> -- Nothing
-         -- pprTrace ("case-of-case -- trying") (ppr _scrut) $
+         dtrace ("case-of-case -- trying") (ppr _scrut) $
          tryReify (simplE False e) -- still necessary?
 #endif
      Trying("cast-of-reify")
      Cast e co | Just nco <- setNominalRole_maybe co ->
        let co' = mkAppCo (mkRepReflCo epTy) nco in  -- why *Rep*ReflCo?
-         -- pprTrace "cast-of-reify" (ppr nco) $
+         dtrace "cast-of-reify" (ppr nco) $
          (`Cast` co') <$> tryReify e
      Trying("recast")
      Cast e co | Just e' <- recast e co -> go e' -- tryReify
 --      -- Now done in recast
 --      Trying("unfold castee")
 --      -- Does this one ever fire anymore?
---      Cast (unfoldMaybe -> Just e') co -> -- pprTrace "unfold castee" empty $
+--      Cast (unfoldMaybe -> Just e') co -> dtrace "unfold castee" empty $
 --                                          tryReify $ Cast e' co
      Trying("repMeth")
      (repMeth -> Just e) -> Just e
@@ -286,7 +294,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
              , Just reV <- tryReify v
        ->
         Just (varApps appV [dom,ran] [reU,reV])
-     _e -> -- pprTrace "reifyP" (text "Unhandled:" <+> ppr _e) $
+     _e -> dtrace "reifyP" ("Unhandled:" <+> ppr _e) $
            Nothing
    -- TODO: Refactor a bit to reduce the collectArgs applications.
    -- v --> ("v'", eval v')
@@ -304,7 +312,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
    tryReify e | reifiableExpr e = -- (guard recursively >> go e) <|>
                                   Just (mkReify e)
-              | otherwise = pprTrace "tryReify: not reifiable:" (ppr e)
+              | otherwise = dtrace "tryReify: not reifiable:" (ppr e)
                             Nothing
    hrMeth :: Type -> Maybe (Id -> CoreExpr)
    hrMeth = hasRepMeth dflags guts inScope
@@ -377,7 +385,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
          -- co :: dom ~#R ran for a newtype instance dom and its representation ran.
          -- repCo :: Rep dom ~# ran
          let repCo = UnivCo UnsafeCoerceProv Representational (repTy dom) ran in
-           -- pprTrace "recast AxiomInstCo:" (ppr repCo) $
+           dtrace "recast AxiomInstCo:" (ppr repCo) $
            Just $ Cast (mkCast e (TransCo co (mkSymCo (mkSubCo repCo)))) repCo
            -- Outer Cast instead of mkCast to avoid optimization.
      | SymCo (AxiomInstCo {}) <- co =
@@ -401,11 +409,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- coercions having those shapes.
    recast e (TransCo inner outer) = -- Use at least one recursive recast so
                                     -- the simplifier doesn't recombine.
-                                    -- pprTrace "TransCo" empty $ -- order?
+                                    dtrace "TransCo" empty $ -- order?
                                     recast (mkCast e inner) outer
-   recast (unfoldMaybe -> Just e') co = -- pprTrace "unfold castee" empty $
+   recast (unfoldMaybe -> Just e') co = dtrace "unfold castee" empty $
                                         Just $ Cast e' co
-   recast _ co = pprTrace ("recast: unhandled " ++ coercionTag co ++ " coercion:")
+   recast _ co = dtrace ("recast: unhandled " ++ coercionTag co ++ " coercion:")
                    (ppr co {- <+> dcolon $$ ppr (coercionType co)-}) Nothing
    -- TODO: Check the type, in case the coercion is not
    repTy :: Unop Type
@@ -435,7 +443,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    dtrace str doc | tracing   = pprTrace str doc
                   | otherwise = id
    pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
-   pprTrans str a b = dtrace str (ppr a $$ text "-->" $$ ppr b) b
+   pprTrans str a b = dtrace str (ppr a $$ "-->" $$ ppr b) b
    -- traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
    -- traceUnop str f a = pprTrans str a (f a)
    traceRewrite :: (Outputable a, Outputable b, Functor f) =>
@@ -447,14 +455,14 @@ reify (ReifyEnv {..}) guts dflags inScope =
      do after <- rew before
         let before' = mkReify before
             oops str doc = pprPanic ("reify post-transfo check. " ++ str)
-                             (doc $$ ppr before' $$ text "-->" $$ ppr after)
+                             (doc $$ ppr before' $$ "-->" $$ ppr after)
             beforeTy = exprType before'
             afterTy  = exprType after
         maybe (if beforeTy `eqType` afterTy then
                  return after
                else
                  oops "type change"
-                  (ppr beforeTy <+> text "vs" <+> ppr afterTy <+> text "in"))
+                  (ppr beforeTy <+> "vs" <+> ppr afterTy <+> "in"))
               (oops "Lint")
           (lintExpr dflags (varSetElems (exprFreeVars before)) before)
    lintReExpr rew before = rew before
@@ -558,6 +566,7 @@ badTyCon tc = qualifiedName (tyConName tc) `elem`
   [ "GHC.Types.[]"
   , "GHC.Integer.Type.Integer"          -- or use isIntegerTy in badTyConApp
   , "GHC.Types.IO"
+  , "GHC.Prim.Addr#"
   , "ReificationRules.Exp.E"            -- TODO: Fix for HOS or okay?
   ]
 
@@ -725,7 +734,8 @@ mkReifyEnv :: [CommandLineOption] -> CoreM ReifyEnv
 mkReifyEnv opts = do
   -- liftIO $ putStrLn ("Options: " ++ show opts)
   hsc_env <- getHscEnv
-  let lookupRdr :: ModuleName -> (String -> OccName) -> (Name -> CoreM a) -> String -> CoreM a
+  let tracing = "trace" `elem` opts
+      lookupRdr :: ModuleName -> (String -> OccName) -> (Name -> CoreM a) -> String -> CoreM a
       lookupRdr modu mkOcc mkThing str =
         maybe (panic err) mkThing =<<
           liftIO (lookupRdrNameInModuleForPlugins hsc_env modu (Unqual (mkOcc str)))
@@ -762,15 +772,16 @@ mkReifyEnv opts = do
   let lookupPrim v tys = M.lookup (tweak (uqVarName v) tys) primMap
       primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys {- [] -} []])
                          <$> lookupPrim v tys
-      isPrimApp (unVarApps -> Just (v,tys,_)) = isJust (lookupPrim v tys)
+      isPrimApp (unVarApps -> Just (v,tys,_)) = isJust (isClassOpId_maybe v) || -- experimenetal
+                                                isJust (lookupPrim v tys)
       isPrimApp _ = False
-      -- tweak nm ts | pprTrace "mkReifyEnv / tweak" (text nm <+> ppr ts) False = undefined
+      -- tweak nm ts | pprTrace "mkReifyEnv / tweak" (nm <+> ppr ts) False = undefined
       tweak "^" [a,isIntTy -> True] | isIntTy    a = "$fBogusInt_$c^"
                                     | isDoubleTy a = "$fBogusDouble_$c^"
       tweak nm _ = nm
   hasRepTc   <- findRepTc "HasRep"
   repTc      <- findRepTc "Rep"
-  hasRepMeth <- hasRepMethodM hasRepTc repTc idV
+  hasRepMeth <- hasRepMethodM tracing hasRepTc repTc idV
   toLitV     <- findExpId "litE"
   hasLitTc   <- findTc "ReificationRules.Prim" "HasLit"
   hasLit     <- toLitM hasLitTc toLitV
@@ -780,7 +791,6 @@ mkReifyEnv opts = do
   let epTy      = mkTyConApp epTc []
       circuitTy = mkTyConApp circuitTc []
       ifCatTy t = mkTyConApp ifCatTc [circuitTy,t]
-      tracing   = "trace" `elem` opts
       
       -- New ones
       idAt t = Var idV `App` Type t     -- varApps idV [t] []
@@ -809,8 +819,8 @@ mkReifyEnv opts = do
 
 type HasRepMeth = DynFlags -> ModGuts -> InScopeEnv -> Type -> Maybe (Id -> CoreExpr)
 
-hasRepMethodM :: TyCon -> TyCon -> Id -> CoreM HasRepMeth
-hasRepMethodM hasRepTc repTc _idV =
+hasRepMethodM :: Bool -> TyCon -> TyCon -> Id -> CoreM HasRepMeth
+hasRepMethodM tracing hasRepTc repTc _idV =
   do hscEnv <- getHscEnv
      _eps   <- liftIO (hscEPS hscEnv)
      return $ \ dflags guts inScope ty ->
@@ -843,8 +853,9 @@ hasRepMethodM hasRepTc repTc _idV =
 #if 1
            findDict = buildDictionary hscEnv dflags guts inScope
                         (mkTyConApp hasRepTc [ty])
+           mkMethApp dict
+             | tracing && pprTrace "hasRepMeth" (ppr ty <+> "-->" <+> ppr dict) False = undefined
            mkMethApp dict =
-             -- pprTrace "hasRepMeth" (ppr ty <+> text "-->" <+> ppr dict) $
              \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
                        varApps meth [ty] [dict]
 #else
@@ -853,7 +864,7 @@ hasRepMethodM hasRepTc repTc _idV =
                   Nominal repTy )
              <$> 
            mkMethApp (dict,(co,ty')) =
-             -- pprTrace "hasRepMeth" (ppr ty <+> text "-->" <+> ppr (dict,co,ty')) $
+             -- pprTrace "hasRepMeth" (ppr ty <+> "-->" <+> ppr (dict,co,ty')) $
              \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
                        varApps meth [ty,ty'] [dict,mkEqBox co]
 #endif
@@ -954,7 +965,7 @@ qualifiedName nm = modStr ++ getOccString nm
 
 -- | Substitute new subexpressions for variables in an expression
 subst :: [(Id,CoreExpr)] -> Unop CoreExpr
-subst ps = substExpr (text "subst") (foldr add emptySubst ps)
+subst ps = substExpr "subst" (foldr add emptySubst ps)
  where
    add (v,new) sub = extendIdSubst sub v new
 
