@@ -16,31 +16,21 @@
 -- Adaptation of HERMIT's buildDictionaryT
 ----------------------------------------------------------------------
 
-module ReificationRules.BuildDictionary (buildDictionary,mkEqBox) where
-
--- TODO: explicit exports
+module ReificationRules.BuildDictionary (buildDictionary) where
 
 import Control.Monad (guard)
 import Data.Char (isSpace)
 import System.IO.Unsafe (unsafePerformIO)
 
 import GhcPlugins
--- import DynamicLoading
--- import Kind (isLiftedTypeKind)
--- import Type (coreView)
--- import TcType (isIntegerTy)
 
-#if __GLASGOW_HASKELL__ > 710 
 import Control.Arrow (second)
+import TcHsSyn (emptyZonkEnv,zonkEvBinds)
 import           TcRnMonad (getCtLocM)
 import           TcRnTypes (cc_ev)
 import TcSMonad (runTcS)
 import TcEvidence (evBindMapBinds)
-import TysWiredIn (heqDataCon)
-import Pair (Pair(..))
-#else
-import           TcRnMonad (getCtLoc)
-#endif
+import TcErrors(warnAllUnsolved)
 
 import DsMonad
 import DsBinds
@@ -72,24 +62,19 @@ runDsMUnsafe env dflags guts = runTcMUnsafe env dflags guts . initDsTc
 buildDictionary' :: HscEnv -> DynFlags -> ModGuts -> Id -> (Id, [CoreBind])
 buildDictionary' env dflags guts evar =
     let (i, bs) = runTcMUnsafe env dflags guts $ do
-#if __GLASGOW_HASKELL__ > 710 
         loc <- getCtLocM (GivenOrigin UnkSkol) Nothing
-#else
-        loc <- getCtLoc $ GivenOrigin UnkSkol
-#endif
         let predTy = varType evar
-#if __GLASGOW_HASKELL__ > 710 
-            nonC = mkNonCanonical $ CtWanted { ctev_pred = predTy, ctev_dest = EvVarDest evar, ctev_loc = loc }
+            nonC = mkNonCanonical $
+                     CtWanted { ctev_pred = predTy, ctev_dest = EvVarDest evar
+                              , ctev_loc = loc }
             wCs = mkSimpleWC [cc_ev nonC]
         -- TODO: Make sure solveWanteds is the right function to call.
-        (_wCs', bnds) <- second evBindMapBinds <$> runTcS (solveWanteds wCs)
-#else
-            nonC = mkNonCanonical $ CtWanted { ctev_pred = predTy, ctev_evar = evar, ctev_loc = loc }
-            wCs = mkSimpleWC [nonC]
-        (_wCs', bnds) <- solveWantedsTcM wCs
-#endif
-        -- reportAllUnsolved _wCs' -- this is causing a panic with dictionary instantiation
-                                  -- revisit and fix!
+        (_wCs', bnds0) <- second evBindMapBinds <$> runTcS (solveWanteds wCs)
+        -- Use the newly exported zonkEvBinds. <https://phabricator.haskell.org/D2088>
+        (_env',bnds) <- zonkEvBinds emptyZonkEnv bnds0
+        -- pprTrace "buildDictionary' _wCs'" (ppr _wCs') (return ())
+        -- changed next line from reportAllUnsolved, which panics. revisit and fix!
+        warnAllUnsolved _wCs'
         return (evar, bnds)
     in
       (i, runDsMUnsafe env dflags guts (dsEvBinds bs))
@@ -105,8 +90,8 @@ buildDictionary env dflags guts inScope ty =
      -- pprTrace "buildDictionary" (ppr ty <+> text "-->" <+> ppr dict) (return ())
      return dict
  where
-   binder   = localId inScope
-                ("$d" ++ zEncodeString (filter (not . isSpace) (showPpr dflags ty))) ty
+   name     = "$d" ++ zEncodeString (filter (not . isSpace) (showPpr dflags ty))
+   binder   = localId inScope name ty
    (i,bnds) = buildDictionary' env dflags guts binder
    dict =
      case bnds of
@@ -127,46 +112,8 @@ localId (inScopeSet,_) str ty =
 
 stringToName :: String -> Name
 stringToName str =
-  mkSystemVarName (mkUniqueGrimily (fromIntegral (hashString str)))
+  mkSystemVarName (mkUniqueGrimily (abs (fromIntegral (hashString str))))
                   (mkFastString str)
 
-#if __GLASGOW_HASKELL__ > 710 
-
--- Modified definition from GHC 7.8.2:
--- This take a ~# b (or a ~# R b) and returns a ~ b (or Coercible a b)
-mkEqBox :: Coercion -> CoreExpr
-mkEqBox co = -- ASSERT2( typeKind ty2 `eqKind` k, ppr co $$ ppr ty1 $$ ppr ty2 $$ ppr (typeKind ty1) $$ ppr (typeKind ty2) )
-             Var (dataConWorkId datacon) `mkTyApps` [k1, k2, ty1, ty2] `App` Coercion co
-  where Pair ty1 ty2 = coercionKind co
-        k1 = typeKind ty1
-        k2 = typeKind ty2
-        datacon = case coercionRole co of 
-            Nominal ->          heqDataCon
-            Representational -> coercibleDataCon
-            Phantom ->          pprPanic "mkEqBox does not support boxing phantom coercions"
-                                         (ppr co)
-
--- (~~) :: forall k1 k2. k1 -> k2 -> Constraint
-
--- Adapted from mkHEqBoxTy in GHC's Inst module
-
--- -- | This takes @a ~# b@ and returns @a ~~ b@.
--- mkHEqBoxTy :: Coercion -> Type -> Type -> Type
--- mkHEqBoxTy co ty1 ty2 =
---   mkTyConApp (promoteDataCon heqDataCon)
---              [typeKind ty1, typeKind ty2, ty1, ty2, mkCoercionTy co]
-
-#if 0
-
--- | This takes @a ~# b@ and returns @a ~ b@.
-mkEqBoxTy :: Coercion -> Type -> Type -> TcM Type
-mkEqBoxTy co ty1 ty2
-  = do { eq_tc <- tcLookupTyCon eqTyConName
-       ; let [datacon] = tyConDataCons eq_tc
-       ; hetero <- mkHEqBoxTy co ty1 ty2
-       ; return $ mkTyConApp (promoteDataCon datacon) [k, ty1, ty2, hetero] }
-  where k = typeKind ty1
-
-#endif
-
-#endif
+-- When mkUniqueGrimily's argument is negative, we see something like
+-- "Exception: Prelude.chr: bad argument: (-52)". Hence the abs.
