@@ -1,4 +1,5 @@
-ghc=~/bin/new-ghc/ghc
+# ghc=~/bin/new-ghc/ghc
+ghc=ghc
 
 shaped = ../../shaped-types
 circat = ../../circat
@@ -65,8 +66,8 @@ GhcFlags += -fno-specialise
 # Experiment
 GhcFlags += -fno-pre-inlining
 
-# Trace reification
-GhcFlags += -fplugin-opt=$(plugin):trace
+# # Trace reification
+# GhcFlags += -fplugin-opt=$(plugin):trace
 
 compile=time $(ghc) -O -fplugin=$(plugin) $(GhcFlags)
 
@@ -95,11 +96,6 @@ circat:
 %.iface: %.hi
 	$(ghc) --show-iface $*.hi > $*.iface
 
-HI_DIR = ../dist/build/ReificationRules
-
-%.iface: $(HI_DIR)/%.hi
-	$(ghc) --show-iface $(HI_DIR)/$*.hi > $*.iface
-
 SHAPED_HI_DIR = ../../shaped-types/dist/build/ShapedTypes
 
 %.iface: $(SHAPED_HI_DIR)/%.hi
@@ -108,6 +104,11 @@ SHAPED_HI_DIR = ../../shaped-types/dist/build/ShapedTypes
 SHAPED_HI_DIR = $(shaped)/dist/build/ShapedTypes
 
 CIRCAT_HI_DIR = $(circat)/dist/build/Circat
+
+HI_DIR = ../dist/build/ReificationRules
+
+%.iface: $(HI_DIR)/%.hi
+	$(ghc) --show-iface $(HI_DIR)/$*.hi > $*.iface
 
 %.iface: $(CIRCAT_HI_DIR)/%.hi
 	$(ghc) --show-iface $(CIRCAT_HI_DIR)/$*.hi > $*.iface

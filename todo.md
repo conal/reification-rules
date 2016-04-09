@@ -9,6 +9,8 @@ The code contains several "`TODO`" comments, some of which are also listed below
 *   Detect whether we'll never be able to complete reification.
 *   Simplify generated code, either during or after reification
 *   More variable renaming for ease of reading
+*   Reify case-of-sum.
+*   Restore sums in circat, and do some examples.
 *   Pretty-print with layout/indentation
 *   Better way to recognize constant expressions of primitive type, to turn them into literals in the reified representation.
 *   In `Plugin`, explore adding a stack of unreified arguments.

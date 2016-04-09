@@ -54,9 +54,9 @@ type LTree = LPow Pair
 
 main :: IO ()
 
--- main = print (reify t)
+main = print (reify t)
 
-main = go "foo" t
+-- main = go "foo" t
 
 -- main = goSep "foo" 2 t
 
@@ -146,7 +146,7 @@ main = go "foo" t
 
 -- t = 3 :# 5 :: Pair Int
 
--- t = \ case u :# v -> u + v :: Int
+t = \ case u :# v -> u + v :: Int
 
 -- t (x :: Int) = y * y where y = x + x
 
@@ -276,7 +276,7 @@ instance Foo Int where
 
 -- t = ()
 
-t (x :: U1 Bool) = case x of { U1 -> () }
+-- t (x :: U1 Bool) = case x of { U1 -> () }
 
 -- t (x :: Par1 Bool) = case x of { Par1 b -> b }
 
