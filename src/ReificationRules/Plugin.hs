@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards     #-}
 {-# LANGUAGE PatternSynonyms   #-}
+{-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE ViewPatterns      #-}
@@ -41,14 +42,12 @@ import Class (classAllSelIds)
 import CoreArity (etaExpand)
 import CoreLint (lintExpr)
 import DynamicLoading
--- import Kind (isLiftedTypeKind)
 import MkId (mkDictSelRhs)
 import Pair (Pair(..))
 import PrelNames (leftDataConName,rightDataConName)
 import Type (coreView)
 import TcType (isIntTy, isDoubleTy)
 import FamInstEnv (normaliseType)
--- import TcType (isIntTy)
 import TyCoRep                          -- TODO: explicit imports
 import Unique (mkBuiltinUnique)
 
@@ -87,7 +86,7 @@ data ReifyEnv = ReifyEnv { appV             :: Id
                          , hasRepMeth       :: HasRepMeth
                          , hasRepFromAbstCo :: Coercion -> CoreExpr
                          , hasLit           :: HasLit
-                         , tracing          :: Bool
+                         , dtrace           :: forall a. String -> SDoc -> a -> a
                          , hsc_env          :: HscEnv
                          }
 
@@ -122,7 +121,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
  where
    go :: ReExpr
    go = \ case 
-     -- e | dtrace "reify go:" (ppr e) False -> undefined
+     e | dtrace "reify go:" (ppr e) False -> undefined
      Trying("lambda")
      Lam x e | not (isTyVar x) ->
        -- lamP :: forall a b. Name# -> (EP a -> EP b) -> EP (a -> b)
@@ -219,7 +218,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
 #endif
      Trying("abstReprCase")
      Case scrut v altsTy alts
-       | not (alreadyAbstReprd scrut)
+       | {-dtrace "abstReprCase. scrut:" (ppr scrut <+> brackets (ppr (alreadyAbstReprd scrut))) True
+       , -}not (alreadyAbstReprd scrut)
        , Just meth <- hrMeth (exprType scrut)
        -> tryReify $ -- go  -- Less chatty with go
           Case (simplE True (meth abst'V) `App` (meth reprV `App` scrut)) v altsTy alts
@@ -228,12 +228,13 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("recast scrutinee")
      Case scrut@(Cast e co) wild ty alts
        | reifiableExpr scrut
+       , not (isJust (setNominalRole_maybe co))
        , Just scrut' <- recast e co ->
-       dtrace "recast scrutinee:" (ppr scrut $$ "scrut':" <+> ppr scrut') $
+       dtrace "recast scrutinee:" (ppr scrut $$ ppr scrut') $
        tryReify (Case scrut' wild ty alts)
      Trying("unfold scrutinee")
      Case scrut v altsTy alts
-       | dtrace ("unfold scrutinee -- trying") (ppr scrut) False -> undefined
+       -- | dtrace ("unfold scrutinee -- trying") (ppr scrut) False -> undefined
        | Just scrut' <- unfoldMaybe scrut
        -> tryReify $ Case scrut' v altsTy alts
 #endif
@@ -315,7 +316,8 @@ reify (ReifyEnv {..}) guts dflags inScope =
               | otherwise = dtrace "tryReify: not reifiable:" (ppr e)
                             Nothing
    hrMeth :: Type -> Maybe (Id -> CoreExpr)
-   hrMeth = hasRepMeth dflags guts inScope
+   hrMeth ty = -- dtrace "hasRepMeth:" (ppr ty) $
+               hasRepMeth dflags guts inScope ty
    literal :: ReExpr
    literal = hasLit dflags guts inScope
    repMeth :: ReExpr
@@ -360,7 +362,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
 #endif
    -- Convert a cast into a more reifiable form (but don't reify)
    recast :: CoreExpr -> Coercion -> Maybe CoreExpr
-   -- recast _ co | pprTrace "recast" (ppr co <+> dcolon <+> ppr (coercionType co)) False = undefined
+   recast _ co | dtrace "recast" (ppr co <+> dcolon <+> ppr (coercionType co)) False = undefined
    -- If we have a nominal(able) coercion, let another reify pass handle it.
    -- Importantly, 'go' above tries this case before recast. Thus, if we see a
    -- nominal coercion here, we've already made progress.
@@ -402,7 +404,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
     where
       Pair dom ran = coercionKind co
 --    recast (AppCo fun arg)
---      | pprTrace "recast AppCo:" (ppr (fun,arg)) False = undefined
+--      | dtrace "recast AppCo:" (ppr (fun,arg)) False = undefined
      -- Does this one ever fire anymore?
    -- TransCo must come after the abst (dom == Rep ran) and repr (ran == Rep
    -- dom) cases, since the AxiomInstCo (newtype) cases create transitive
@@ -438,17 +440,21 @@ reify (ReifyEnv {..}) guts dflags inScope =
    buildDict :: Type -> CoreExpr
    buildDict ty = fromMaybe (pprPanic "reify - couldn't build dictionary for" (ppr ty)) $
                   buildDictMaybe ty
-   -- Tracing
-   dtrace :: String -> SDoc -> a -> a
-   dtrace str doc | tracing   = pprTrace str doc
-                  | otherwise = id
    pprTrans :: (Outputable a, Outputable b) => String -> a -> b -> b
    pprTrans str a b = dtrace str (ppr a $$ "-->" $$ ppr b) b
    -- traceUnop :: (Outputable a, Outputable b) => String -> Unop (a -> b)
    -- traceUnop str f a = pprTrans str a (f a)
-   traceRewrite :: (Outputable a, Outputable b, Functor f) =>
-                   String -> Unop (a -> f b)
+#if 0
+   -- This version sometimes (usually/always?) fails to work. It used to be
+   -- reliable. What happened?
+   traceRewrite :: (Outputable a, Outputable b) =>
+                   String -> Unop (a -> Maybe b)
    traceRewrite str f a = pprTrans str a <$> f a
+#else
+   traceRewrite :: (Outputable a, Outputable (f b)) =>
+                   String -> Unop (a -> f b)
+   traceRewrite str f a = pprTrans str a (f a)
+#endif
    -- Apply a rewrite, lint the result, and check that the type is preserved.
    lintReExpr :: Unop ReExpr
    lintReExpr rew before | lintSteps =
@@ -521,9 +527,6 @@ unVarApps (collectArgs -> (Var v,allArgs)) = Just (v,tys,others)
    unType e        = pprPanic "unVarApps - unType" (ppr e)
 unVarApps _ = Nothing
 
--- reifiableKind :: Kind -> Bool
--- reifiableKind = isLiftedTypeKind
-
 -- Types we know how to handle
 reifiableType :: Type -> Bool
 -- reifiableType ty | pprTrace "reifiableType" (ppr ty) False = undefined
@@ -531,44 +534,39 @@ reifiableType (coreView -> Just ty) = reifiableType ty
 reifiableType (splitFunTy_maybe -> Just (dom,ran)) = reifiableType dom && reifiableType ran
 reifiableType ty = not (or (($ ty) <$> bads))
  where
-   bads = [ try "isForAllTy" $ isForAllTy
-      --  , try "not . reifiableKind . typeKind" $ not . reifiableKind . typeKind
-          , try "isPredTy" $ isPredTy
-          , try "badTyConArg" $ badTyConArg
+   bads = [ try "isForAllTy"  $ isForAllTy
+          , try "non-lifted"  $ not . isLiftedTypeKind . typeKind
+          , try "isPredTy"    $ isPredTy
           , try "badTyConApp" $ badTyConApp
           ]
-   try :: String -> Unop (Type -> Bool)
-   try _str p x = -- pprTrace (_str ++ ":") (ppr y)
-                  y
-     where y = p x
+   try :: SDoc -> Unop (Type -> Bool)
+   try _why p t = {-(if b then
+                    pprTrace "reifiableType"
+                      (ppr t <+> dcolon <+> ppr (typeKind t) <+> "rejected via" <+> _why)
+                  else id)-} b
+    where b = p t
 
--- badTyConArg is problematic with the reifiableKind test. Consider Pow Pair,
--- which has reifiable kind, but Pair doesn't. What do I really want?
-
-badTyConArg :: Type -> Bool
--- badTyConArg ty | pprTrace "badTyConArg" (ppr ty) False = undefined
-badTyConArg (coreView -> Just ty)             = badTyConArg ty
-badTyConArg (tyConAppArgs_maybe -> Just args) = -- pprTrace "tyConAppArgs" (ppr args) $
-                                                not (all reifiableType args)
-badTyConArg _                                 = False
+-- typeKind (ForAllTy (Anon _) _) = liftedTypeKind
 
 badTyConApp :: Type -> Bool
 -- badTyConApp ty | pprTrace "badTyConApp" (ppr ty) False = undefined
 badTyConApp (coreView -> Just ty)            = badTyConApp ty
--- badTyConApp (isIntegerTy -> True)            = True  -- or in badTycon
 badTyConApp (tyConAppTyCon_maybe -> Just tc) = badTyCon tc
 badTyConApp _                                = False
--- TODO: rename
 
 badTyCon :: TyCon -> Bool
 -- badTyCon tc | pprTrace "badTyCon" (ppr tc) False = undefined
-badTyCon tc = qualifiedName (tyConName tc) `elem`
-  [ "GHC.Types.[]"
-  , "GHC.Integer.Type.Integer"          -- or use isIntegerTy in badTyConApp
-  , "GHC.Types.IO"
-  , "GHC.Prim.Addr#"
-  , "ReificationRules.Exp.E"            -- TODO: Fix for HOS or okay?
-  ]
+badTyCon (tyConName -> name) =
+  qualifiedName name `elem`
+     [ "GHC.Types.[]"
+     , "GHC.Integer.Type.Integer"          -- or use isIntegerTy in badTyConApp
+     , "GHC.Types.IO"
+     , "ReificationRules.Exp.E"            -- TODO: Fix for HOS or okay?
+     ]
+  || badModule (moduleNameString . moduleName <$> nameModule_maybe name)
+ where
+   badModule = maybe False (`elem` badMods)
+   badMods = [ "Circat.Circuit", "Circat.Category", "Circat.Classes" ]
 
 reifiableExpr :: CoreExpr -> Bool
 reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
@@ -650,7 +648,7 @@ plugin = defaultPlugin { installCoreToDos = install }
 
 install :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 install opts todos =
-  do pprTrace ("Reify install " ++ show opts) empty (return ())
+  do -- pprTrace ("Reify install " ++ show opts) empty (return ())
      dflags <- getDynFlags
      -- Unfortunately, the plugin doesn't work in GHCi. Until I can fix it,
      -- disable under GHCi, so we can at least type-check conveniently.
@@ -681,14 +679,14 @@ install opts todos =
 -- type PluginPass = ModGuts -> CoreM ModGuts
 
 addReifyRules :: ReifyEnv -> Unop ModGuts
-addReifyRules (ReifyEnv { .. }) guts = --- pprTrace "addReifyRules new rules" (ppr rules) $
+addReifyRules (ReifyEnv { .. }) guts = -- dtrace "addReifyRules new rules" (ppr rules) $
                                        on_mg_rules (++ rules) guts
  where
    rules = catMaybes (reifyDefRule <$> mg_binds guts)
    reifyDefRule :: CoreBind -> Maybe CoreRule
    reifyDefRule (Rec _) = Nothing
-   reifyDefRule (NonRec v rhs) = -- pprTrace "reifyDefRule" (ppr v) $
-                                 -- pprTrace "rule" (ppr mbRule) $
+   reifyDefRule (NonRec v rhs) = dtrace "reifyDefRule" (ppr v) $
+                                 dtrace "rule" (ppr mbRule) $
                                  mbRule
     where
       mbRule = rule v <$> collectOuter rhs
@@ -706,21 +704,24 @@ addReifyRules (ReifyEnv { .. }) guts = --- pprTrace "addReifyRules new rules" (p
        args = [Type (exprType arg),arg]
        arg = mkCoreApps (Var v) (varToCoreExpr <$> vs)
    collectOuter :: CoreExpr -> Maybe ([Var],CoreExpr)
-   collectOuter e -- | pprTrace "collectOuter" (ppr e <+> dcolon <+> ppr (exprType e)) False = undefined
-                  | isTyCoDictArg e = -- pprTrace "collectOuter isTyCoDictArg" empty $
+   collectOuter e | dtrace "collectOuter" (ppr e <+> dcolon <+> ppr (exprType e)) False = undefined
+                  | isTyCoDictArg e = dtrace "collectOuter isTyCoDictArg" empty $
                                       Nothing
                   | otherwise       = 
      case (exprType e, e) of
        (_, Lam v body) | isTyCoVar v || isDictTy (idType v) ->
-         -- pprTrace "collectOuter Lam" empty $
+         dtrace "collectOuter Lam" empty $
          first (v:) <$> collectOuter body
-       (FunTy dom _, _) | not (reifiableType dom), not (isLam e) -> -- pprTrace "collectOuter non-re domain" (ppr dom) $
-                                                                    etaRetry
-       (ForAllTy (Named {}) _,_)          -> -- pprTrace "collectOuter ForAllTy" empty $
+       -- TODO: Rethink this case. etaExpand can leave casts unchanged, which
+       -- was causing an infinite loop here.
+       -- 
+       -- (FunTy dom _, _) | not (reifiableType dom), not (isLam e) -> dtrace "collectOuter non-re domain" (ppr dom) $
+       --                                                              etaRetry
+       (ForAllTy (Named {}) _,_)          -> dtrace "collectOuter ForAllTy" empty $
                                              etaRetry
-       (ty,_)           | reifiableExpr e -> -- pprTrace "collectOuter done" empty $
+       (ty,_)           | reifiableExpr e -> dtrace "collectOuter done" empty $
                                              Just ([], varApps reifyV [ty] [e])
-                        | otherwise       -> -- pprTrace "collectOuter bailing:" empty $
+                        | otherwise       -> dtrace "collectOuter bailing:" empty $
                                              Nothing
     where
       etaRetry = collectOuter (etaExpand 1 e)
@@ -735,6 +736,9 @@ mkReifyEnv opts = do
   -- liftIO $ putStrLn ("Options: " ++ show opts)
   hsc_env <- getHscEnv
   let tracing = "trace" `elem` opts
+      dtrace :: String -> SDoc -> a -> a
+      dtrace str doc | tracing   = pprTrace str doc
+                     | otherwise = id
       lookupRdr :: ModuleName -> (String -> OccName) -> (Name -> CoreM a) -> String -> CoreM a
       lookupRdr modu mkOcc mkThing str =
         maybe (panic err) mkThing =<<
@@ -824,7 +828,9 @@ hasRepMethodM tracing hasRepTc repTc _idV =
   do hscEnv <- getHscEnv
      _eps   <- liftIO (hscEPS hscEnv)
      return $ \ dflags guts inScope ty ->
-       let repTy = mkTyConApp repTc [ty]
+       let dtrace str doc a | tracing   = pprTrace str doc a
+                            | otherwise = a
+           repTy = mkTyConApp repTc [ty]
 #if 1
            newtypeDict :: Maybe CoreExpr
            newtypeDict = Nothing
@@ -834,7 +840,7 @@ hasRepMethodM tracing hasRepTc repTc _idV =
              do (tc,tyArgs) <- splitTyConApp_maybe ty
                 (tvs,newtyRhs,_coax) <- unwrapNewTyCon_maybe tc
                 -- TODO: refactor to isolate the Maybe stuff.
-                -- pprTrace "newtypeDict. coax:" (ppr _coax) (return ())
+                -- dtrace "newtypeDict. coax:" (ppr _coax) (return ())
                 let ty'   = substTy (zipTvSubst tvs tyArgs) newtyRhs
                     [hasRepDc] = tyConDataCons hasRepTc
                     mkIdFun t = varApps idV [t] []
@@ -850,68 +856,14 @@ hasRepMethodM tracing hasRepTc repTc _idV =
                 return (dict,(repNtIs,ty'))
 #endif
            findDict :: Maybe CoreExpr
-#if 1
            findDict = buildDictionary hscEnv dflags guts inScope
-                        (mkTyConApp hasRepTc [ty])
-           mkMethApp dict
-             | tracing && pprTrace "hasRepMeth" (ppr ty <+> "-->" <+> ppr dict) False = undefined
+                         (mkTyConApp hasRepTc [ty])
            mkMethApp dict =
-             \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
-                       varApps meth [ty] [dict]
-#else
-           findDict =
-             (, normaliseType (eps_fam_inst_env eps, mg_fam_inst_env guts)
-                  Nominal repTy )
-             <$> 
-           mkMethApp (dict,(co,ty')) =
-             -- pprTrace "hasRepMeth" (ppr ty <+> "-->" <+> ppr (dict,co,ty')) $
-             \ meth -> -- pprTrace "hasRepMeth meth" (ppr meth) $
-                       varApps meth [ty,ty'] [dict,mkEqBox co]
-#endif
+             dtrace "hasRepMeth" (ppr ty <+> "-->" <+> ppr dict) $
+             \ meth -> varApps meth [ty] [dict]
        in
           -- Real dictionary or synthesize
           mkMethApp <$> (findDict <|> newtypeDict)
-
-
--- asNewtype :: Type -> Maybe (Type, DictExpr, Coercion)
--- asNewtype ty =
-
--- -- If the given type is an application of a newtype, yield the representation
--- -- type and the coercion from newtype to representation type.
--- unwrapNewType :: Type -> Maybe Type
--- unwrapNewType ty =
---   do (tc,tyArgs)          <- splitTyConApp_maybe ty
---      (tvs,newtyRhs,_coax) <- unwrapNewTyCon_maybe tc
---      return (substTy (zipTvSubst tvs tyArgs) newtyRhs)
-
--- <Sum a>_R -> Data.Monoid.N:Sum[0]
---               (Sub (Sym (Circat.Rep.D:R:RepSum[0] <a>_N)))
--- :: (Sum a -> Sum a) ~R# (Sum a -> Rep (Sum a))
-
-
--- mkUnbranchedAxInstCo :: Role -> CoAxiom Unbranched
---                      -> [Type] -> [Coercion] -> Coercion
-
--- Maybe useful:
-
--- mkUnbranchedAxInstRHS :: CoAxiom Unbranched -> [Type] -> [Coercion] -> Type
--- mkUnbranchedAxInstRHS ax = mkAxInstRHS ax 0
-
-
--- mkReflCo :: Role -> Type -> Coercion
--- mkFunCo :: Role -> Coercion -> Coercion -> Coercion
-
-
--- unwrapNewTyCon_maybe :: TyCon -> Maybe ([TyVar], Type, CoAxiom Unbranched)
--- splitTyConApp_maybe :: Type -> Maybe (TyCon, [Type])
-
--- zipVarEnv         :: [Var] -> [a] -> VarEnv a
-
--- zipTvSubst :: [TyVar] -> [Type] -> TCvSubst
-
--- TyCoRep.substTy ::
---   ?callStack::GHC.Stack.Types.CallStack => TCvSubst -> Type -> Type
---   	-- Defined in ‘TyCoRep’
 
 type HasLit = DynFlags -> ModGuts -> InScopeEnv -> ReExpr
 
