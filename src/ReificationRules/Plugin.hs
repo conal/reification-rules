@@ -31,7 +31,7 @@ module ReificationRules.Plugin (plugin) where
 import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard)
-import Data.Maybe (fromMaybe,isJust,catMaybes)
+import Data.Maybe (fromMaybe,isJust,maybeToList)
 import Data.List (isPrefixOf,isSuffixOf,elemIndex)
 import Data.Char (toLower)
 import qualified Data.Map as M
@@ -279,7 +279,12 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("eval")
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
      Trying("unfold")
-     (unfoldMaybe -> Just e') -> tryReify e'
+     -- Only unfold applications if the arguments are non-reifiable, so we can
+     -- use synthesized reify rules. TODO: reconsider our other uses of
+     -- unfoldMaybe.
+     e@(collectTysDictsArgs -> (Var _,_,_))
+       | Just e' <- unfoldMaybe e -> tryReify e'
+     -- (unfoldMaybe -> Just e') -> tryReify e'
      -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
      Trying("case-apps")
@@ -617,7 +622,7 @@ stdMethMap = M.fromList $
   [ ("fst","exlP"), ("snd","exrP"), ("(,)","pairP")
   -- Experiment: let these boolean operations inline,
   -- and rediscover them in circuit optimization.
-  -- , ("not","notP"), ("||","orP"), ("&&","andP")
+  , ("not","notP"), ("||","orP"), ("&&","andP")
   , ("ifThenElse","ifP")]
  where
    -- Unqualified method name, e.g., "$fNumInt_$c+".
@@ -658,11 +663,11 @@ install opts todos =
       else
        do reinitializeGlobals
           env <- mkReifyEnv opts
-          -- For now, just insert the rule.
-          -- TODO: add "reify_" bindings and maybe rules.
-          let addRule guts = pure (on_mg_rules (reifyRule env guts :) guts)
-          return $   CoreDoPluginPass "Reify insert rule" addRule
-                   : CoreDoPluginPass "Add reify definitions" (return . addReifyRules env)
+          -- Add the rule after existing ones, so that automatically generated
+          -- specialized reify rules are tried first.
+          let addRule guts = pure (on_mg_rules (++ [reifyRule env guts]) guts)
+          return $   CoreDoPluginPass "Add reify definitions" (return . addReifyRules env)
+                   : CoreDoPluginPass "Reify insert rule" addRule
                    : CoreDoSimplify 2 mode
                    : todos
  where
@@ -679,17 +684,21 @@ install opts todos =
 -- type PluginPass = ModGuts -> CoreM ModGuts
 
 addReifyRules :: ReifyEnv -> Unop ModGuts
-addReifyRules (ReifyEnv { .. }) guts = -- dtrace "addReifyRules new rules" (ppr rules) $
+addReifyRules (ReifyEnv { .. }) guts = -- pprTrace "addReifyRules old rules" (ppr (mg_rules guts)) $
+                                       -- pprTrace "addReifyRules new rules" (ppr rules) $
                                        on_mg_rules (++ rules) guts
  where
-   rules = catMaybes (reifyDefRule <$> mg_binds guts)
-   reifyDefRule :: CoreBind -> Maybe CoreRule
-   reifyDefRule (Rec _) = Nothing
-   reifyDefRule (NonRec v rhs) = dtrace "reifyDefRule" (ppr v) $
-                                 dtrace "rule" (ppr mbRule) $
-                                 mbRule
+   rules = reifyDefRule =<< mg_binds guts
+   reifyDefRule :: CoreBind -> [CoreRule]
+   reifyDefRule (Rec _) = -- pprTrace "reifyDefRule Rec" (ppr (fst <$> bs)) $
+                          -- pprTrace "reifyDefRule Rec group" (ppr (Rec bs)) $
+                          []
+   reifyDefRule (NonRec v rhs) = pprTrace "reifyDefRule" (ppr v) $
+                                 dtrace "rules" (ppr rs) $
+                                 rs
     where
-      mbRule = rule v <$> collectOuter rhs
+      rs :: [CoreRule]
+      rs = maybeToList (rule v <$> collectOuter rhs)
    rule :: Id -> ([Var],CoreExpr) -> CoreRule
    rule v (vs,rhs) = mkRule (mg_module guts)
                             False                             -- auto
@@ -754,6 +763,8 @@ mkReifyEnv opts = do
       findBaseId  = findId "GHC.Base"
       findMiscId  = findId "ReificationRules.Misc"
       findMonoId  = findId "ReificationRules.MonoPrims"
+  ruleBase <- getRuleBase
+  dtrace "mkReifyEnv: getRuleBase ==" (ppr ruleBase) (return ())
   appV     <- findExpId "appP"
   lamV     <- findExpId "lamP"
   letV     <- findExpId "letP"
@@ -773,6 +784,9 @@ mkReifyEnv opts = do
   composeV <- findBaseId "."
   prePostV <- findMiscId "-->"
   primMap  <- mapM findMonoId stdMethMap
+--   let RuleInfo rules _ = ruleInfo (idInfo reifyV) in
+--     do drace "reify install: reifyP rule info" (ppr rules) (return ())
+--        drace "reify install: reifyV unique: " (ppr (idUnique reifyV)) (return ())
   let lookupPrim v tys = M.lookup (tweak (uqVarName v) tys) primMap
       primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys {- [] -} []])
                          <$> lookupPrim v tys
