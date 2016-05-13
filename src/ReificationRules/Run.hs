@@ -87,7 +87,7 @@ genPdf :: Bool
 genPdf = True
 
 showPretty :: Bool
-showPretty = True
+showPretty = False -- True
 
 showGraph :: Bool
 showGraph = False
@@ -106,12 +106,12 @@ outGV :: String -> [Attr] -> UU -> IO ()
 outGV name attrs circ =
   do when showGraph $ putStrLn $ "outGV: Graph \n" ++ show g
      writeDot attrs g
-     when genPdf $ displayDot ("pdf","") name
+     when genPdf $ displayDot ("pdf","") name'
      -- displayDot ("svg","") 
      -- displayDot ("png","-Gdpi=200")
      when genVerilog $ saveAsVerilog g
  where
-   g = mkGraph name circ
+   g@(name',_,_) = mkGraph name circ
 {-# NOINLINE outGV #-}
 
 -- TODO: Move file-saving code from outD and saveVerilog to here.
