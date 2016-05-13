@@ -31,7 +31,7 @@ module ReificationRules.Plugin (plugin) where
 import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard)
-import Data.Maybe (fromMaybe,isJust,maybeToList)
+import Data.Maybe (fromMaybe,isJust,catMaybes)
 import Data.List (isPrefixOf,isSuffixOf,elemIndex)
 import Data.Char (toLower)
 import qualified Data.Map as M
@@ -116,7 +116,7 @@ type ReExpr = Rewrite CoreExpr
 reify :: ReifyEnv -> ModGuts -> DynFlags -> InScopeEnv -> ReExpr
 reify (ReifyEnv {..}) guts dflags inScope =
   traceRewrite "reifyP" $
-  lintReExpr $
+  (if lintSteps then lintReExpr else id) $
   go
  where
    go :: ReExpr
@@ -282,9 +282,15 @@ reify (ReifyEnv {..}) guts dflags inScope =
      -- Only unfold applications if the arguments are non-reifiable, so we can
      -- use synthesized reify rules. TODO: reconsider our other uses of
      -- unfoldMaybe.
-     e@(collectTysDictsArgs -> (Var _,_,_))
-       | Just e' <- unfoldMaybe e -> tryReify e'
-     -- (unfoldMaybe -> Just e') -> tryReify e'
+     e@(collectArgsPred isTyCoDictArg -> (Var _v,_))
+       | -- dtrace "reify unfold try" (ppr _v <+> text "... -->" <+> ppr (unfoldMaybe e)) True,
+       Just e' <- unfoldMaybe e -> tryReify e'
+
+--      e@(collectArgs -> (Var v, _)) | uqVarName v == "$dmsum", pprTrace "reify $dmsum" (ppr e $$ ppr (collectTysDictsArgs e)) False -> undefined
+--      e@(collectTysDictsArgs -> (Var _,_,_))
+--        | Just e' <- unfoldMaybe e -> tryReify e'
+--      -- (unfoldMaybe -> Just e') -> tryReify e'
+
      -- TODO: try to handle non-standard constructor applications along with unfold.
      -- Other applications
      Trying("case-apps")
@@ -318,7 +324,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
    -- tryReify e = guard (reifiableExpr e) >> (go e <|> Just (mkReify e))
    tryReify e | reifiableExpr e = -- (guard recursively >> go e) <|>
                                   Just (mkReify e)
-              | otherwise = dtrace "tryReify: not reifiable:" (ppr e)
+              | otherwise = dtrace "tryReify: not reifiable:" (ppr e <+> dcolon <+> ppr (exprType e))
                             Nothing
    hrMeth :: Type -> Maybe (Id -> CoreExpr)
    hrMeth ty = -- dtrace "hasRepMeth:" (ppr ty) $
@@ -430,16 +436,19 @@ reify (ReifyEnv {..}) guts dflags inScope =
    unfolded e = fromMaybe e (unfoldMaybe e)               
    -- Inline in applications (function part) and casts.
    unfoldMaybe :: ReExpr
-   unfoldMaybe e = -- traceRewrite "unfoldMaybe" $
+   unfoldMaybe = traceRewrite "unfoldMaybe" $
+                 \ e ->
+                   dtrace "unfoldMaybe: isPrimApp" (parens (ppr e) <+> text "=" <+> ppr (isPrimApp e)) (return ()) >>
                    guard (not (isPrimApp e)) >>
-                   onExprHead inlineMaybe e
+                   onExprHead (traceRewrite "inlineMaybe" inlineMaybe) e
    inlineMaybe :: Id -> Maybe CoreExpr
+   -- inlineMaybe v | dtrace "inlineMaybe" (ppr v) False = undefined
    inlineMaybe v = (inlineId <+ -- onInlineFail <+ traceRewrite "inlineClassOp"
                                 inlineClassOp) v
-   -- onInlineFail :: Id -> Maybe CoreExpr
-   -- onInlineFail v =
-   --   pprTrace "onInlineFail idDetails" (ppr v <+> colon <+> ppr (idDetails v))
-   --   Nothing
+   onInlineFail :: Id -> Maybe CoreExpr
+   onInlineFail v =
+     pprTrace "onInlineFail idDetails" (ppr v <+> colon <+> ppr (idDetails v))
+     Nothing
    buildDictMaybe :: Type -> Maybe CoreExpr
    buildDictMaybe = buildDictionary hsc_env dflags guts inScope
    buildDict :: Type -> CoreExpr
@@ -462,7 +471,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
 #endif
    -- Apply a rewrite, lint the result, and check that the type is preserved.
    lintReExpr :: Unop ReExpr
-   lintReExpr rew before | lintSteps =
+   lintReExpr rew before =
      do after <- rew before
         let before' = mkReify before
             oops str doc = pprPanic ("reify post-transfo check. " ++ str)
@@ -476,7 +485,6 @@ reify (ReifyEnv {..}) guts dflags inScope =
                   (ppr beforeTy <+> "vs" <+> ppr afterTy <+> "in"))
               (oops "Lint")
           (lintExpr dflags (varSetElems (exprFreeVars before)) before)
-   lintReExpr rew before = rew before
    mkCompose :: Binop CoreExpr
    g `mkCompose` f = varApps composeV [b,c,a] [g,f]
     where
@@ -657,7 +665,6 @@ install opts todos =
      dflags <- getDynFlags
      -- Unfortunately, the plugin doesn't work in GHCi. Until I can fix it,
      -- disable under GHCi, so we can at least type-check conveniently.
-     -- TODO: Try some flags.
      if hscTarget dflags == HscInterpreted then
         return todos
       else
@@ -688,17 +695,30 @@ addReifyRules (ReifyEnv { .. }) guts = -- pprTrace "addReifyRules old rules" (pp
                                        -- pprTrace "addReifyRules new rules" (ppr rules) $
                                        on_mg_rules (++ rules) guts
  where
-   rules = reifyDefRule =<< mg_binds guts
-   reifyDefRule :: CoreBind -> [CoreRule]
-   reifyDefRule (Rec _) = -- pprTrace "reifyDefRule Rec" (ppr (fst <$> bs)) $
-                          -- pprTrace "reifyDefRule Rec group" (ppr (Rec bs)) $
-                          []
-   reifyDefRule (NonRec v rhs) = pprTrace "reifyDefRule" (ppr v) $
-                                 dtrace "rules" (ppr rs) $
-                                 rs
+   rules = reifyDefRules =<< mg_binds guts
+#if 1
+   reifyDefRules :: CoreBind -> [CoreRule]
+   reifyDefRules = catMaybes . map defRule . flattenBinds . pure
+    where
+      defRule :: (Id,CoreExpr) -> Maybe CoreRule
+      defRule (v,rhs) = -- pprTrace "reifyDefRules" (ppr v) $
+                        dtrace "mbRule" (ppr mbRule) $
+                        mbRule
+       where
+         mbRule :: Maybe CoreRule
+         mbRule = rule v <$> collectOuter rhs
+#else
+   reifyDefRules :: CoreBind -> [CoreRule]
+   reifyDefRules (Rec bs) = -- pprTrace "reifyDefRules Rec" (ppr (fst <$> bs)) $
+                            pprTrace "reifyDefRules Rec group" (ppr (Rec bs)) $
+                            [] -- concat (reifyDefRules <$> bs)
+   reifyDefRules (NonRec v rhs) = pprTrace "reifyDefRules" (ppr v) $
+                                  dtrace "rules" (ppr rs) $
+                                  rs
     where
       rs :: [CoreRule]
       rs = maybeToList (rule v <$> collectOuter rhs)
+#endif
    rule :: Id -> ([Var],CoreExpr) -> CoreRule
    rule v (vs,rhs) = mkRule (mg_module guts)
                             False                             -- auto
@@ -790,7 +810,7 @@ mkReifyEnv opts = do
   let lookupPrim v tys = M.lookup (tweak (uqVarName v) tys) primMap
       primFun ty v tys = (\ primId -> varApps constV [ty] [varApps primId tys {- [] -} []])
                          <$> lookupPrim v tys
-      isPrimApp (unVarApps -> Just (v,tys,_)) = isJust (isClassOpId_maybe v) || -- experimenetal
+      isPrimApp (unVarApps -> Just (v,tys,_)) = -- isJust (isClassOpId_maybe v) || -- experimenetal
                                                 isJust (lookupPrim v tys)
       isPrimApp _ = False
       -- tweak nm ts | pprTrace "mkReifyEnv / tweak" (nm <+> ppr ts) False = undefined
