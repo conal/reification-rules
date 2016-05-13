@@ -79,6 +79,11 @@ buildDictionary' env dflags guts evar =
     in
       (i, runDsMUnsafe env dflags guts (dsEvBinds bs))
 
+-- TODO: Richard Eisenberg: "use TcMType.newWanted to make your CtWanted. As it
+-- stands, if predTy is an equality constraint, your CtWanted will be
+-- ill-formed, as all equality constraints should have HoleDests, not
+-- EvVarDests. Using TcMType.newWanted will simplify and improve your code."
+
 -- TODO: Why return the given evar?
 
 -- TODO: Try to combine the two runTcMUnsafe calls.
