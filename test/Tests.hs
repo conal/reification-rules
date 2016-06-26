@@ -44,24 +44,29 @@ import ShapedTypes.LPow (LPow)
 import ShapedTypes.RPow (RPow)
 import qualified ShapedTypes.LPow as L
 import qualified ShapedTypes.RPow as R
+-- import qualified ShapedTypes.Fams as F
 import ShapedTypes.Sized
 import ShapedTypes.Linear
 import ShapedTypes.Scan
 import ShapedTypes.FFT
 
+-- GADT versions
 type RTree = RPow Pair
 type LTree = LPow Pair
 
+-- -- Type family versions
+-- type RTree n = F.RPow Pair n
+-- type LTree n = F.LPow Pair n
+
 main :: IO ()
 
-main = print (reify t)
+-- main = print (reify t)
 
--- main = go "foo" t
+main = go "foo" t
 
 -- main = goSep "foo" 2 t
 
-
--- main = goSep "fft-r2-8" 16 (fft :: RTree N8 C -> LTree N8 C)
+-- main = goSep "fft-r2-6" 6 (fft :: RTree N6 C -> LTree N6 C)
 
 -- main = goSep "fft-l2-6" 12 (fft :: LTree N6 C -> RTree N6 C)
 
@@ -146,7 +151,7 @@ main = print (reify t)
 
 -- t = 3 :# 5 :: Pair Int
 
-t = \ case u :# v -> u + v :: Int
+-- t = \ case u :# v -> u + v :: Int
 
 -- t (x :: Int) = y * y where y = x + x
 
@@ -174,7 +179,13 @@ t = \ case u :# v -> u + v :: Int
 
 -- t = mappend :: Binop (Sum Int)
 
--- t = sum :: RTree N1 Int -> Int
+-- -- t :: Monoid o => (a -> o) -> Pair a -> o
+-- t :: (a -> Sum Int) -> Pair a -> Sum Int
+-- t = foldMap
+
+-- t = sum :: Pair Int -> Int
+
+-- t = sum :: RTreeTF N5 Int -> Int
 
 -- t = sum (pure 1 :: Vec N4 Int)
 
@@ -213,15 +224,19 @@ t = \ case u :# v -> u + v :: Int
 
 -- t = lsums :: Pair Int -> (Pair Int, Int)
 
+-- t = lsums @Pair @Int
+
 -- t = lsums :: RTree N4 Int -> (RTree N4 Int, Int)
 
 -- t = lsums :: LTree N6 Int -> (LTree N6 Int, Int)
 
 -- t = lsums :: Vec N6 Int -> (Vec N6 Int, Int)
 
--- t = powers :: Int -> RTree N4 Int
+t = powers :: Int -> RTree N4 Int
 
 -- t = evalPoly :: RTree N4 Int -> Int -> Int
+
+#if 1
 
 {--------------------------------------------------------------------
     In progress
@@ -417,6 +432,8 @@ L.unB       :: LTree (S n)   a  -> LTree n (Pair a)
 transpose    :: LTree n (Pair a) -> Pair (LTree n a)
 fmap invertL :: Pair (LTree n a) -> Pair (RTree n a)
 R.B         :: Pair (RTree n a) -> RTree (S n)   a
+#endif
+
 #endif
 
 #endif

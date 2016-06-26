@@ -4,9 +4,8 @@ ghc=ghc
 shaped = ../../shaped-types
 circat = ../../circat
 
-plugin=ReificationRules.Plugin
-
-default: go
+# default: go
+default: suite
 
 suite:
 	cd .. ; make suite
@@ -16,6 +15,10 @@ check-ghc:
 
 go: Tests Makefile ../dist
 	./Tests
+
+plugin=ReificationRules.Plugin
+
+GhcFlags += -fplugin=$(plugin)
 
 GhcFlags += -fexpose-all-unfoldings
 GhcFlags += -dcore-lint
@@ -33,7 +36,7 @@ GhcFlags += -fforce-recomp
 # GhcFlags += -ddump-inlinings
 
 GhcFlags += -dsuppress-idinfo
-GhcFlags += -dsuppress-module-prefixes
+# GhcFlags += -dsuppress-module-prefixes
 # GhcFlags += -dsuppress-uniques
 
 # GhcFlags += -dsuppress-type-signatures
@@ -58,6 +61,8 @@ GhcFlags += -dsuppress-module-prefixes
 
 GhcFlags += -fsimpl-tick-factor=200
 
+# GhcFlags += -ddump-simpl-stats
+
 # GhcFlags += -funfolding-keeness-factor=0 -funfolding-use-threshold=0
 
 # Specialization blows up transpose code exponentially. Revisit when we reify partially.
@@ -69,7 +74,7 @@ GhcFlags += -fno-pre-inlining
 # # Trace reification
 # GhcFlags += -fplugin-opt=$(plugin):trace
 
-compile=time $(ghc) -O -fplugin=$(plugin) $(GhcFlags)
+compile=time $(ghc) -O $(GhcFlags)
 
 Tests: ../dist $(circat)/dist $(shaped)/dist Tests.hs Makefile
 	$(compile) $@
@@ -110,7 +115,7 @@ HI_DIR = ../dist/build/ReificationRules
 %.iface: $(HI_DIR)/%.hi
 	$(ghc) --show-iface $(HI_DIR)/$*.hi > $*.iface
 
-%.iface: $(CIRCAT_HI_DIR)/%.hi
-	$(ghc) --show-iface $(CIRCAT_HI_DIR)/$*.hi > $*.iface
+# %.iface: $(CIRCAT_HI_DIR)/%.hi
+# 	$(ghc) --show-iface $(CIRCAT_HI_DIR)/$*.hi > $*.iface
 
 ifaces: HOS.iface Pair.iface Circuit.iface Rep.iface
