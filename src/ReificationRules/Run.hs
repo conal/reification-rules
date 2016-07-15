@@ -90,7 +90,7 @@ showPretty :: Bool
 showPretty = False -- True
 
 showGraph :: Bool
-showGraph = False
+showGraph = False -- True
 
 -- Run an example: reify, CCC, circuit.
 run :: Okay a => String -> [Attr] -> E Prim a -> IO ()
