@@ -4,8 +4,8 @@ ghc=ghc
 shaped = ../../shaped-types
 circat = ../../circat
 
-# default: go
-default: suite
+default: go
+# default: suite
 
 suite:
 	cd .. ; make suite
@@ -87,6 +87,8 @@ ReTest: ../dist $(circat)/dist $(shaped)/dist Tests.hs Makefile
 
 # RT: ../dist RT.hs Makefile
 # 	$(compile) $@
+
+libs: circat shaped compile
 
 shaped:
 	cd $(shaped) ; make
