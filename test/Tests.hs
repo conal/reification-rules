@@ -76,6 +76,12 @@ main = go "foo" t
     Working examples
 --------------------------------------------------------------------}
 
+-- t = fromInteger 2 :: Float
+
+-- t = (+) :: Binop Float
+
+-- t = (==) :: BinRel Float
+
 -- t = not
 
 -- t = not False
@@ -228,11 +234,11 @@ main = go "foo" t
 
 -- t = lsums :: RTree N4 Int -> (RTree N4 Int, Int)
 
--- t = lsums :: LTree N6 Int -> (LTree N6 Int, Int)
+t = lsums :: LTree N6 Int -> (LTree N6 Int, Int)
 
 -- t = lsums :: Vec N6 Int -> (Vec N6 Int, Int)
 
-t = powers :: Int -> RTree N4 Int
+-- t = powers :: Int -> RTree N4 Int
 
 -- t = evalPoly :: RTree N4 Int -> Int -> Int
 
