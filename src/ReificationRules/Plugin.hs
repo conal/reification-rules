@@ -32,7 +32,7 @@ import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard)
 import Data.Maybe (fromMaybe,isJust,catMaybes)
-import Data.List (isPrefixOf,isSuffixOf,elemIndex)
+import Data.List (isPrefixOf,isSuffixOf,elemIndex,sort)
 import Data.Char (toLower)
 import qualified Data.Map as M
 import Text.Printf (printf)
@@ -46,7 +46,7 @@ import MkId (mkDictSelRhs)
 import Pair (Pair(..))
 import PrelNames (leftDataConName,rightDataConName)
 import Type (coreView)
-import TcType (isIntTy, isDoubleTy)
+import TcType (isIntTy, isFloatTy, isDoubleTy)
 import FamInstEnv (normaliseType)
 import TyCoRep                          -- TODO: explicit imports
 import Unique (mkBuiltinUnique)
@@ -588,10 +588,10 @@ reifiableExpr e = not (isTyCoArg e) && reifiableType (exprType e)
     Primitive translation
 --------------------------------------------------------------------}
 
-#if 0
+#if 1
 -- Generate code for MonoPrims
 monoPrimDefs :: String
-monoPrimDefs = unlines
+monoPrimDefs = unlines $ sort
   [ printf "%-7s = %6sP :: Prim (%-6s %-6s)" pat prim tyOp ty
   | (_cls,tyOp,tys,ps) <- stdClassOpInfo, ty <- tys
   , (_op,prim) <- ps, let pat = primAt prim ty ]
@@ -599,23 +599,27 @@ monoPrimDefs = unlines
 
 stdClassOpInfo :: [(String,String,[String],[(String,String)])]
 stdClassOpInfo =
-   [ ( "Eq","BinRel",["Bool","Int","Double"]
+   [ ( "Eq","BinRel",bifd
      , [("==","Eq"), ("/=","Ne")])
-   , ( "Ord","BinRel",["Bool","Int","Double"]
+   , ( "Ord","BinRel",bifd
      , [("<","Lt"),(">","Gt"),("<=","Le"),(">=","Ge")])
-   , ( "Num","Unop",["Int","Double"]
+   , ( "Num","Unop",ifd
      , [("negate","Negate")])
-   , ( "Num","Binop",["Int","Double"]
+   , ( "Num","Binop",ifd
      , [("+","Add"),("-","Sub"),("*","Mul")])
-   , ( "Bogus","PowIop",["Int","Double"]
+   , ( "Bogus","PowIop",ifd
      , [("^","PowI")])
-   , ( "Floating","Unop",["Double"]
+   , ( "Floating","Unop",fd
      , [("exp","Exp"),("cos","Cos"),("sin","Sin")])
-   , ( "Fractional","Unop",["Double"]
+   , ( "Fractional","Unop",fd
      , [("recip","Recip")])
-   , ( "Fractional","Binop",["Double"]
+   , ( "Fractional","Binop",fd
      , [("/","Divide")])
    ]
+ where
+   fd   = ["Float","Double"]
+   ifd  = "Int" : fd
+   bifd = "Bool" : ifd
 
 -- Name of prim type specialization in MonoPrims
 primAt :: String -> String -> String
@@ -631,7 +635,9 @@ stdMethMap = M.fromList $
   -- Experiment: let these boolean operations inline,
   -- and rediscover them in circuit optimization.
   , ("not","notP"), ("||","orP"), ("&&","andP")
-  , ("ifThenElse","ifP")]
+  , ("ifThenElse","ifP")
+  , ("eqDouble","dEq"), ("eqFloat","fEq")  -- odd exceptions
+  ]
  where
    -- Unqualified method name, e.g., "$fNumInt_$c+".
    -- Eq & Ord for Int use "eqInt" etc.
@@ -815,6 +821,7 @@ mkReifyEnv opts = do
       isPrimApp _ = False
       -- tweak nm ts | pprTrace "mkReifyEnv / tweak" (nm <+> ppr ts) False = undefined
       tweak "^" [a,isIntTy -> True] | isIntTy    a = "$fBogusInt_$c^"
+                                    | isFloatTy  a = "$fBogusFloat_$c^"
                                     | isDoubleTy a = "$fBogusDouble_$c^"
       tweak nm _ = nm
   hasRepTc   <- findRepTc "HasRep"
@@ -917,7 +924,8 @@ toLitM hasLitTc toLitV =
    isLiteral (collectArgs -> (Var v, _)) =
      isJust (isDataConId_maybe v) ||
      uqVarName v `elem`
-       ["$fNumInt_$cfromInteger", "$fNumDouble_$cfromInteger","int2Double"]
+       [ "$fNumInt_$cfromInteger", "$fNumFloat_$cfromInteger"
+       , "$fNumDouble_$cfromInteger","int2Double" ]
    isLiteral _ = False
 
 -- TODO: check args in isLiteral to make sure that they don't need reifying.
