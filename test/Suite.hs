@@ -120,8 +120,9 @@ tests = return
 --   , test 0.5 "powers-vec6" (powers @(Vec N6) @Int)
 --   , test 0.5 "evalPoly-vec6" (evalPoly @(Vec N6) @Int)
 
---   , test 2.2 "powers-rt4"   (powers @(RBin N4) @Int)
---   , test 1.6 "evalPoly-rt4" (evalPoly @(RBin N4) @Int)
+--   , test 8 "powers-rt8"   (powers @(RBin N8) @Int)
+
+  , test 6 "evalPoly-rt6" (evalPoly @(RBin N6) @Int)
 
 --   , test 0.5 "lsums-lvec6" (lsums @(F.LVec N6) @Int)
 --   , test 0.5 "lsums-rvec6" (lsums @(F.RVec N6) @Int)
@@ -137,7 +138,7 @@ tests = return
 --   , test 8   "lsums-q3" (lsums @(QBin N3) @Int)
 --   , test 32  "lsums-q4" (lsums @(QBin N4) @Int)
 
-  , test 8 "fft-rt5" (fft @(RBin N5) @Double)
+--   , test 8 "fft-rt5" (fft @(RBin N5) @Double)
 
 --   , test 8 "fft-lt5" (fft @(LBin N5) @Double)
 
