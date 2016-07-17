@@ -57,7 +57,7 @@ Test-Suite test-reify
   Build-Depends:    base<5, Cabal >= 1.10
                   , circat, reification-rules, shaped-types
 
-  ghc-options:      -O
+  ghc-options:      -O2
 
 --   ghc-options:      -O -fplugin=ReificationRules.Plugin
 --                     -fplugin-opt=ReificationRules.Plugin:trace
