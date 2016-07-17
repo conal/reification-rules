@@ -7,7 +7,7 @@ To install, you'll need a few non-Hackage libraries from GitHub:
 *   [HERMIT](https://github.com/ku-fpg/hermit)
 *   [netlist libs](https://github.com/ku-fpg/netlist)
 *   [circat](https://github.com/conal/circat)
-*   [shaped-types](https://github.com/conal/shaped-types) (for examples)
+*   [shaped-types](https://github.com/conal/shaped-types) (only if testing)
 
 You'll also need [graphviz](http://www.graphviz.org/) for rendering the circuit diagrams. For instance, "brew install graphv" on Mac OS, if you have [homebrew](http://brew.sh/) installed.
 
