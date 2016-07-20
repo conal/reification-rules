@@ -48,11 +48,11 @@ tests :: IO [Test]
 tests = return
   [ nopTest
   , test 0.5 "not" not          -- works
-  , test 0.5 "foo" foo          -- crashes
+  , test 0.5 "crash1" crash1    -- crashes
   ]
 
-foo :: Bool -> Maybe Bool
-foo a = fmap id (Just a)
+crash1 :: Bool -> Maybe Bool
+crash1 a = fmap id (Just a)
 
 -- 	reification residuals:
 --   [error
