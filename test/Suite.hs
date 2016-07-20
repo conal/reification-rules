@@ -25,6 +25,13 @@
 
 -- {-# OPTIONS_GHC -fplugin-opt=ReificationRules.Plugin:trace  #-}
 
+-- When I list the plugin in the test suite's .cabal target instead of here, I get
+--
+--   <command line>: Could not find module ‘ReificationRules.Plugin’
+--   It is a member of the hidden package ‘reification-rules-0.0.0’.
+--   Perhaps you need to add ‘reification-rules’ to the build-depends in your .cabal file.
+
+
 module Suite (tests) where
 
 import Distribution.TestSuite
