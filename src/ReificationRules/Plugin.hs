@@ -82,8 +82,11 @@ data ReifyEnv = ReifyEnv { appV             :: Id
                          , reprPV           :: Id
                          , unIV             :: Id
                          , idV              :: Id
+                         , undefinedV       :: Id
                          , composeV         :: Id
                          , prePostV         :: Id
+                         , botPV            :: Id
+                         , botCatTy         :: Type -> Type
                          , ifPV             :: Id
                          , ifCatTy          :: Type -> Type
                          , epTy             :: Type
@@ -160,6 +163,11 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("case-default")
      Case _scrut (isDeadBinder -> True) _rhsTy [(DEFAULT,[],rhs)] ->
        tryReify rhs
+     Trying("undefined") -- TODO: handle error instead
+     e@(collectArgs -> (Var v,[_rep,ty,_callstack]))
+       | v == undefinedV
+       , Just botDict <- buildDictMaybe (botCatTy (exprType e))
+       -> Just (varApps botPV [] [ty, botDict])
      Trying("if-then-else")
      e@(Case scrut wild rhsTy [ (DataAlt false, [], falseVal)
                               , (DataAlt true , [],  trueVal) ])
@@ -632,7 +640,7 @@ stdMethMap = M.fromList $
   -- Experiment: let these boolean operations inline,
   -- and rediscover them in circuit optimization.
   , ("not","notP"), ("||","orP"), ("&&","andP")
-  , ("ifThenElse","ifP")
+  , ("ifThenElse","ifP")  -- used?
   , ("eqDouble","dEq"), ("eqFloat","fEq")  -- odd exceptions
   ]
  where
@@ -805,25 +813,27 @@ mkReifyEnv opts = do
       findMonoId  = findId "ReificationRules.MonoPrims"
   ruleBase <- getRuleBase
   dtrace "mkReifyEnv: getRuleBase ==" (ppr ruleBase) (return ())
-  appV     <- findExpId "appP"
-  lamV     <- findExpId "lamP"
-  letV     <- findExpId "letP"
-  letPairV <- findExpId "letPairP"
-  ifPV     <- findExpId "ifP"
-  reifyV   <- findExpId "reifyP"
-  evalV    <- findExpId "evalP"
-  constV   <- findExpId "constP"
-  abstV    <- findExpId "abst"
-  reprV    <- findExpId "repr"
-  abst'V   <- findExpId "abst'"
-  repr'V   <- findExpId "repr'"
-  abstPV   <- findExpId "abstP"
-  reprPV   <- findExpId "reprP"
-  unIV     <- findExpId "unI#"
-  idV      <- findBaseId "id"
-  composeV <- findBaseId "."
-  prePostV <- findMiscId "-->"
-  primMap  <- mapM findMonoId stdMethMap
+  appV       <- findExpId "appP"
+  lamV       <- findExpId "lamP"
+  letV       <- findExpId "letP"
+  letPairV   <- findExpId "letPairP"
+  botPV      <- findExpId "bottomP"
+  ifPV       <- findExpId "ifP"
+  reifyV     <- findExpId "reifyP"
+  evalV      <- findExpId "evalP"
+  constV     <- findExpId "constP"
+  abstV      <- findExpId "abst"
+  reprV      <- findExpId "repr"
+  abst'V     <- findExpId "abst'"
+  repr'V     <- findExpId "repr'"
+  abstPV     <- findExpId "abstP"
+  reprPV     <- findExpId "reprP"
+  unIV       <- findExpId "unI#"
+  idV        <- findBaseId "id"
+  undefinedV <- findBaseId "undefined"
+  composeV   <- findBaseId "."
+  prePostV   <- findMiscId "-->"
+  primMap    <- mapM findMonoId stdMethMap
 --   let RuleInfo rules _ = ruleInfo (idInfo reifyV) in
 --     do drace "reify install: reifyP rule info" (ppr rules) (return ())
 --        drace "reify install: reifyV unique: " (ppr (idUnique reifyV)) (return ())
@@ -846,10 +856,13 @@ mkReifyEnv opts = do
   hasLit     <- toLitM hasLitTc toLitV
   circuitTc  <- findTc "Circat.Circuit" ":>"
   ifCatTc    <- findTc "Circat.Classes" "IfCat"
+  botCatTc   <- findTc "Circat.Classes" "BottomCat"
   epTc       <- findTc "ReificationRules.HOS" "EP"
-  let epTy      = mkTyConApp epTc []
-      circuitTy = mkTyConApp circuitTc []
-      ifCatTy t = mkTyConApp ifCatTc [circuitTy,t]
+  let epTy       = mkTyConApp epTc []
+      circuitTy  = mkTyConApp circuitTc []
+      catTy tc t = mkTyConApp tc [circuitTy,t]
+      ifCatTy    = catTy ifCatTc
+      botCatTy   = catTy botCatTc
       
       -- New ones
       idAt t = Var idV `App` Type t     -- varApps idV [t] []

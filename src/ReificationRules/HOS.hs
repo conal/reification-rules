@@ -38,7 +38,7 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.HOS
-  ( EP,toE,constP,appP,lamP,letP,letPairP,ifP,evalP,reifyP,reify, litE
+  ( EP,toE,constP,appP,lamP,letP,letPairP,ifP,bottomP,evalP,reifyP,reify, litE
   , abst,repr,abst',repr', abstP,reprP
   , E, Prim
   , unI#
@@ -210,6 +210,9 @@ constP = constE'
 
 -- The NOINLINEs are just to reduce noise when examining Core output.
 -- Remove them later.
+
+bottomP :: CircuitBot a => EP a
+bottomP = constP BottomP
 
 ifP :: CircuitIf a => EP Bool -> Binop (EP a)
 ifP i t e = constP IfP ^: (i *# (t *# e))
