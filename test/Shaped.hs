@@ -21,7 +21,7 @@
 
 ----------------------------------------------------------------------
 -- |
--- Module      :  Suite
+-- Module      :  Shaped
 -- Copyright   :  (c) 2016 Conal Elliott
 -- License     :  BSD3
 --
@@ -36,7 +36,7 @@
 
 -- {-# OPTIONS_GHC -fplugin-opt=ReificationRules.Plugin:trace  #-}
 
-module Suite (tests) where
+module Shaped (tests) where
 
 import Data.Tuple (swap)
 import GHC.Generics hiding (S)
@@ -122,7 +122,7 @@ tests = return
 
 --   , test 8 "powers-rt8"   (powers @(RBin N8) @Int)
 
---   , test 6 "evalPoly-rt6" (evalPoly @(RBin N6) @Int)
+  , test 6 "evalPoly-rt6" (evalPoly @(RBin N6) @Int)
 
 --   , test 0.5 "lsums-lvec6" (lsums @(F.LVec N6) @Int)
 --   , test 0.5 "lsums-rvec6" (lsums @(F.RVec N6) @Int)
@@ -146,11 +146,7 @@ tests = return
 --   -- Probably an infinite simplification loop.
 --   , test 3 "fft-v5-v4" (fft @(Vec N5 :.: Vec N4) @Double)
 --   , test 3 "fft-v5-v4-v3" (fft @(Vec N5 :.: Vec N4 :.: Vec N3) @Double)
-  , test 0.5 "foo" foo
   ]
-
-foo :: Double -> Maybe Double
-foo a = fmap id (Just a)
 
 type QBin n = PPow n Pair
 

@@ -1,16 +1,17 @@
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE TypeApplications    #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {-# OPTIONS_GHC -Wall #-}
 
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
--- {-# OPTIONS_GHC -fno-warn-unused-imports #-}
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 {-# OPTIONS_GHC -fno-warn-unused-binds   #-}
 
 ----------------------------------------------------------------------
 -- |
--- Module      :  Suite
+-- Module      :  Basic
 -- Copyright   :  (c) 2016 Conal Elliott
 -- License     :  BSD3
 --
@@ -31,9 +32,9 @@
 --   It is a member of the hidden package ‘reification-rules-0.0.0’.
 --   Perhaps you need to add ‘reification-rules’ to the build-depends in your .cabal file.
 
+module Basic (tests) where
 
-module Suite (tests) where
-
+import Data.Tuple (swap)
 import Distribution.TestSuite
 
 import ReificationRules.HOS (E,Prim,reify)
@@ -47,7 +48,11 @@ render = True -- False
 tests :: IO [Test]
 tests = return
   [ nopTest
-  , test 0.5 "not" not          -- works
+--   , test 0.5 "not" not          -- works
+--   , test 0.5 "or-not" (\ x y -> x || not y)
+--   , test 0.5 "pow-6" (\ (a :: Double) -> (a + 1) ^ (6 :: Int))  -- product tree
+--   , test 0.5 "pow-7" (\ (a :: Double) -> (a + 1) ^ (7 :: Int))
+--   , test 0.5 "swap" (swap @Int @Bool)
   , test 0.5 "crash1" crash1    -- crashes
   ]
 

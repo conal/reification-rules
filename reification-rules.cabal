@@ -50,11 +50,26 @@ Library
   ghc-options:      -Wall
 
 
-Test-Suite test-reify
+Test-Suite shaped
   type:             detailed-0.9
   default-language: Haskell98
   hs-Source-Dirs:   test
-  test-module:      Suite
+  test-module:      Shaped
+  Build-Depends:    Cabal >= 1.24.0.0
+                  , base<5
+                  , circat
+                  , reification-rules
+                  , shaped-types
+  ghc-options:      -O2
+
+Test-Suite basic
+  type:             detailed-0.9
+  default-language: Haskell98
+  hs-Source-Dirs:   test
+  test-module:      Basic
   Build-Depends:    base<5, Cabal >= 1.10
                   , circat, reification-rules
   ghc-options:      -O2
+
+-- "stack test" builds and runs both/all test suites.
+-- "stack build :shaped" or "stack build :basic" builds and runs just one suite.
