@@ -56,9 +56,5 @@ Test-Suite test-reify
   hs-Source-Dirs:   test
   test-module:      Suite
   Build-Depends:    base<5, Cabal >= 1.10
-                  , circat, reification-rules, shaped-types
-
+                  , circat, reification-rules
   ghc-options:      -O2
-
---   ghc-options:      -O -fplugin=ReificationRules.Plugin
---                     -fplugin-opt=ReificationRules.Plugin:trace
