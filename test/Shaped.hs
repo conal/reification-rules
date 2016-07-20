@@ -1,3 +1,5 @@
+-- -*- flycheck-disabled-checkers: '(haskell-ghc haskell-stack-ghc); -*-
+
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE FlexibleContexts    #-}
@@ -84,6 +86,22 @@ tests :: IO [Test]
 tests = return
   [ nopTest
 
+  , test 0.5 "swap" (swap @Int @Bool)
+  , test 0.5 "sum-p" (sum @Pair @Int)
+  , test 1 "sum-rb5" (sum @(RBin N5) @Int)
+  , test 4 "transpose-rb4" (transpose @Pair @(RBin N4) @Bool)
+  , test 1 "dot-lb3" ((<.>) @(LBin N3) @Int)
+  , test 1.5 "linapp-v3-2" (($@) @(Vec N3) @(Vec N2) @Int)
+  , test 5.0 "linapp-r3-2" (($@) @(RBin N3) @(RBin N2) @Int)
+  , test 5.0 "linapp-l3-2" (($@) @(LBin N3) @(LBin N2) @Int)
+  , test 10 "lincomp-r342" ((.@) @(RBin N3) @(RBin N4) @(RBin N2) @Int)
+  , test 1 "lsums-rb4" (lsums @(RBin N4) @Int)
+  , test 1 "lsums-lb4" (lsums @(LBin N4) @Int)
+  , test 1 "powers-rb4" (powers @(RBin N4) @Int)
+  , test 1 "evalPoly-rb4" (evalPoly @(RBin N4) @Int)
+  , test 8 "fft-rb5" (fft @(RBin N5) @Double)
+  , test 8 "fft-lb5" (fft @(LBin N5) @Double)
+
 --   -- no-opt
 --   , test 0.5 "sum-lvec6" (sum @(F.LVec N6) @Int)
 --   , test 0.5 "sum-rvec6" (sum @(F.RVec N6) @Int)
@@ -122,7 +140,7 @@ tests = return
 
 --   , test 8 "powers-rt8"   (powers @(RBin N8) @Int)
 
-  , test 6 "evalPoly-rt6" (evalPoly @(RBin N6) @Int)
+--   , test 6 "evalPoly-rt6" (evalPoly @(RBin N6) @Int)
 
 --   , test 0.5 "lsums-lvec6" (lsums @(F.LVec N6) @Int)
 --   , test 0.5 "lsums-rvec6" (lsums @(F.RVec N6) @Int)
@@ -146,6 +164,10 @@ tests = return
 --   -- Probably an infinite simplification loop.
 --   , test 3 "fft-v5-v4" (fft @(Vec N5 :.: Vec N4) @Double)
 --   , test 3 "fft-v5-v4-v3" (fft @(Vec N5 :.: Vec N4 :.: Vec N3) @Double)
+
+--     -- residuals after first pass, but later resolved
+--   , test 0.5 "fft-lt1" (fft @(LBin N1) @Double)
+
   ]
 
 type QBin n = PPow n Pair
