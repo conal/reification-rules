@@ -679,8 +679,8 @@ install opts todos =
           return $   CoreDoPluginPass "Add reify definitions" (return . addReifyRules env)
                    : CoreDoPluginPass "Reify insert rule" addRule
                    : CoreDoSimplify 2 mode
-                   : CoreDoPluginPass "Flag remaining reify calls" (flagReify env)
                    : todos
+                   ++ [CoreDoPluginPass "Flag remaining reify calls" (flagReify env)]
  where
    flagReify :: ReifyEnv -> PluginPass
    flagReify (ReifyEnv {..}) guts
