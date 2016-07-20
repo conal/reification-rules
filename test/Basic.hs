@@ -1,3 +1,5 @@
+-- -*- flycheck-disabled-checkers: '(haskell-ghc haskell-stack-ghc); -*-
+
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -24,7 +26,7 @@
 {-# OPTIONS_GHC -fplugin=ReificationRules.Plugin -dcore-lint -fexpose-all-unfoldings #-}
 {-# OPTIONS_GHC -dsuppress-idinfo -dsuppress-module-prefixes -dsuppress-uniques #-}
 
--- {-# OPTIONS_GHC -fplugin-opt=ReificationRules.Plugin:trace  #-}
+{-# OPTIONS_GHC -fplugin-opt=ReificationRules.Plugin:trace  #-}
 
 -- When I list the plugin in the test suite's .cabal target instead of here, I get
 --
