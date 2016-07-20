@@ -82,7 +82,7 @@ data ReifyEnv = ReifyEnv { appV             :: Id
                          , reprPV           :: Id
                          , unIV             :: Id
                          , idV              :: Id
-                         , undefinedV       :: Id
+                         , errorV           :: Id
                          , composeV         :: Id
                          , prePostV         :: Id
                          , botPV            :: Id
@@ -163,11 +163,12 @@ reify (ReifyEnv {..}) guts dflags inScope =
      Trying("case-default")
      Case _scrut (isDeadBinder -> True) _rhsTy [(DEFAULT,[],rhs)] ->
        tryReify rhs
-     Trying("undefined") -- TODO: handle error instead
-     e@(collectArgs -> (Var v,[_rep,ty,_callstack]))
-       | v == undefinedV
+     Trying("error")
+     e@(collectArgs -> (Var v,[_rep,ty,_callstack,_errorMsg]))
+       | v == errorV
        , Just botDict <- buildDictMaybe (botCatTy (exprType e))
-       -> Just (varApps botPV [] [ty, botDict])
+       -> -- TODO: maybe carry along error message
+          Just (varApps botPV [] [ty, botDict])
      Trying("if-then-else")
      e@(Case scrut wild rhsTy [ (DataAlt false, [], falseVal)
                               , (DataAlt true , [],  trueVal) ])
@@ -830,7 +831,7 @@ mkReifyEnv opts = do
   reprPV     <- findExpId "reprP"
   unIV       <- findExpId "unI#"
   idV        <- findBaseId "id"
-  undefinedV <- findBaseId "undefined"
+  errorV     <- findBaseId "error"
   composeV   <- findBaseId "."
   prePostV   <- findMiscId "-->"
   primMap    <- mapM findMonoId stdMethMap
