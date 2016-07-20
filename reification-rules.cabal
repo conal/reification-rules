@@ -21,14 +21,15 @@ Library
   default-language: Haskell98
   hs-Source-Dirs:   src
   Build-Depends:    base<5
+                  , circat
+                  , constraints
                   , containers
                   , ghc >= 7.10.3
                   , ghc-prim
-                  , constraints
+                  , hermit >= 1.0.0.1
+                  , syb >= 0.6
                   , transformers >= 0.4
                   , ty >= 0.1.5
-                  , hermit >= 1.0.0.1
-                  , circat
 
 -- TODO: drop ty, and use Data.Type.Equality
 
