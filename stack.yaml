@@ -16,10 +16,10 @@ packages:
     git: https://github.com/conal/circat
     commit: 19800ccc6b675b0b6f48a7c59c8e8d37692d0d74
   extra-dep: true
-# - location:
-#     git: https://github.com/conal/shaped-types
-#     commit: 213e08be9cddadb4c7cab4c181fad3adc4b981da
-#   extra-dep: true
+- location:
+    git: https://github.com/conal/shaped-types
+    commit: 213e08be9cddadb4c7cab4c181fad3adc4b981da
+  extra-dep: true
 resolver: nightly-2016-07-18
 extra-deps:
 - ty-0.1.7
