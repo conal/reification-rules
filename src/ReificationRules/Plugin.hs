@@ -31,9 +31,14 @@ module ReificationRules.Plugin (plugin) where
 import Control.Arrow (first)
 import Control.Applicative (liftA2,(<|>))
 import Control.Monad (unless,guard)
+import Data.Foldable (toList)
 import Data.Maybe (fromMaybe,isJust,catMaybes)
 import Data.List (isPrefixOf,isSuffixOf,elemIndex,sort)
 import Data.Char (toLower)
+import Data.Data (Data)
+import Data.Generics (GenericQ,mkQ,everything)
+import Data.Sequence (Seq)
+import qualified Data.Sequence as S
 import qualified Data.Map as M
 import Text.Printf (printf)
 
@@ -599,22 +604,14 @@ monoPrimDefs = unlines $ sort
 
 stdClassOpInfo :: [(String,String,[String],[(String,String)])]
 stdClassOpInfo =
-   [ ( "Eq","BinRel",bifd
-     , [("==","Eq"), ("/=","Ne")])
-   , ( "Ord","BinRel",bifd
-     , [("<","Lt"),(">","Gt"),("<=","Le"),(">=","Ge")])
-   , ( "Num","Unop",ifd
-     , [("negate","Negate")])
-   , ( "Num","Binop",ifd
-     , [("+","Add"),("-","Sub"),("*","Mul")])
-   , ( "Bogus","PowIop",ifd
-     , [("^","PowI")])
-   , ( "Floating","Unop",fd
-     , [("exp","Exp"),("cos","Cos"),("sin","Sin")])
-   , ( "Fractional","Unop",fd
-     , [("recip","Recip")])
-   , ( "Fractional","Binop",fd
-     , [("/","Divide")])
+   [ ( "Eq","BinRel",bifd,      [("==","Eq"), ("/=","Ne")])
+   , ( "Ord","BinRel",bifd,     [("<","Lt"),(">","Gt"),("<=","Le"),(">=","Ge")])
+   , ( "Num","Unop",ifd,        [("negate","Negate")])
+   , ( "Num","Binop",ifd,       [("+","Add"),("-","Sub"),("*","Mul")])
+   , ( "Bogus","PowIop",ifd,    [("^","PowI")])
+   , ( "Floating","Unop",fd,    [("exp","Exp"),("cos","Cos"),("sin","Sin")])
+   , ( "Fractional","Unop",fd,  [("recip","Recip")])
+   , ( "Fractional","Binop",fd, [("/","Divide")])
    ]
  where
    fd   = ["Float","Double"]
@@ -682,8 +679,25 @@ install opts todos =
           return $   CoreDoPluginPass "Add reify definitions" (return . addReifyRules env)
                    : CoreDoPluginPass "Reify insert rule" addRule
                    : CoreDoSimplify 2 mode
+                   : CoreDoPluginPass "Flag remaining reify calls" (flagReify env)
                    : todos
  where
+   flagReify :: ReifyEnv -> PluginPass
+   flagReify (ReifyEnv {..}) guts
+     | S.null remaining = return guts
+     | otherwise = -- pprTrace "reification residuals:" (ppr (toList remaining)) (return guts)
+                   pprPanic "reification residuals:" (ppr (toList remaining))
+    where
+      remaining :: Seq CoreExpr
+      remaining = collect reifyArgs (mg_binds guts)
+      reifyArgs :: CoreExpr -> Seq CoreExpr
+      reifyArgs (App (App (Var v) _t) e) | v == reifyV = S.singleton e
+      -- reifyArgs e@(App (App (Var v) _t) _) | v == reifyV = S.singleton e
+      reifyArgs _                             = mempty
+      -- reifyArgs = const mempty  -- for now
+      collect :: (Data a, Monoid m) => (a -> m) -> GenericQ m
+      collect f = everything mappend (mkQ mempty f)
+   -- flagReify guts = 
    -- Extra simplifier pass for reification.
    -- Rules on, no inlining, and case-of-case.
    mode = SimplMode { sm_names      = ["Reify simplifier pass"]
@@ -708,7 +722,7 @@ addReifyRules (ReifyEnv { .. }) guts = -- pprTrace "addReifyRules old rules" (pp
     where
       defRule :: (Id,CoreExpr) -> Maybe CoreRule
       defRule (v,rhs) = -- pprTrace "reifyDefRules" (ppr v) $
-                        dtrace "mbRule" (ppr mbRule) $
+                        -- dtrace "mbRule" (ppr mbRule) $
                         mbRule
        where
          mbRule :: Maybe CoreRule
@@ -739,24 +753,24 @@ addReifyRules (ReifyEnv { .. }) guts = -- pprTrace "addReifyRules old rules" (pp
        args = [Type (exprType arg),arg]
        arg = mkCoreApps (Var v) (varToCoreExpr <$> vs)
    collectOuter :: CoreExpr -> Maybe ([Var],CoreExpr)
-   collectOuter e | dtrace "collectOuter" (ppr e <+> dcolon <+> ppr (exprType e)) False = undefined
-                  | isTyCoDictArg e = dtrace "collectOuter isTyCoDictArg" empty $
+   collectOuter e -- | dtrace "collectOuter" (ppr e <+> dcolon <+> ppr (exprType e)) False = undefined
+                  | isTyCoDictArg e = -- dtrace "collectOuter isTyCoDictArg" empty $
                                       Nothing
                   | otherwise       = 
      case (exprType e, e) of
        (_, Lam v body) | isTyCoVar v || isDictTy (idType v) ->
-         dtrace "collectOuter Lam" empty $
+         -- dtrace "collectOuter Lam" empty $
          first (v:) <$> collectOuter body
        -- TODO: Rethink this case. etaExpand can leave casts unchanged, which
        -- was causing an infinite loop here.
        -- 
        -- (FunTy dom _, _) | not (reifiableType dom), not (isLam e) -> dtrace "collectOuter non-re domain" (ppr dom) $
        --                                                              etaRetry
-       (ForAllTy (Named {}) _,_)          -> dtrace "collectOuter ForAllTy" empty $
+       (ForAllTy (Named {}) _,_)          -> -- dtrace "collectOuter ForAllTy" empty $
                                              etaRetry
-       (ty,_)           | reifiableExpr e -> dtrace "collectOuter done" empty $
+       (ty,_)           | reifiableExpr e -> -- dtrace "collectOuter done" empty $
                                              Just ([], varApps reifyV [ty] [e])
-                        | otherwise       -> dtrace "collectOuter bailing:" empty $
+                        | otherwise       -> -- dtrace "collectOuter bailing:" empty $
                                              Nothing
     where
       etaRetry = collectOuter (etaExpand 1 e)
