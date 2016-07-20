@@ -1,5 +1,10 @@
 ## To-do items
 
+*   Replace `AbsTyImports` with a module that re-exports.
+
+
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
 The code contains several "`TODO`" comments, some of which are also listed below.
 
 *   Factor generated reification rules into `reifyP`-free code (definition) and `reifyP` residuals, to reduce code size and compilation time.
