@@ -26,7 +26,7 @@
 {-# OPTIONS_GHC -fplugin=ReificationRules.Plugin -dcore-lint -fexpose-all-unfoldings #-}
 {-# OPTIONS_GHC -dsuppress-idinfo -dsuppress-module-prefixes -dsuppress-uniques #-}
 
-{-# OPTIONS_GHC -fplugin-opt=ReificationRules.Plugin:trace  #-}
+-- {-# OPTIONS_GHC -fplugin-opt=ReificationRules.Plugin:trace  #-}
 
 -- When I list the plugin in the test suite's .cabal target instead of here, I get
 --
@@ -41,6 +41,7 @@ import Distribution.TestSuite
 
 import ReificationRules.HOS (E,Prim,reify)
 import qualified ReificationRules.Run as Run
+import ReificationRules.Misc (Binop)
 
 -- Whether to render to a PDF (vs print reified expression)
 render :: Bool
@@ -55,7 +56,8 @@ tests = return
 --   , test 0.5 "pow-6" (\ (a :: Double) -> (a + 1) ^ (6 :: Int))  -- product tree
 --   , test 0.5 "pow-7" (\ (a :: Double) -> (a + 1) ^ (7 :: Int))
 --   , test 0.5 "swap" (swap @Int @Bool)
-  , test 0.5 "crash1" crash1    -- crashes
+--   , test 0.5 "crash1" crash1    -- crashes
+  , test 0.5 "min-int" (min :: Binop Int) -- fails
   ]
 
 crash1 :: Bool -> Maybe Bool
@@ -83,6 +85,9 @@ crash1 a = fmap id (Just a)
 --       `cast` (Sym (N:IP[0] <"callStack">_N <CallStack>_N)
 --               :: (CallStack :: *) ~R# ((?callStack::CallStack) :: Constraint)))
 --      undefined1]
+
+-- I think the problem is with the current encoding of Maybe, given
+-- the more complicated undefined we have since GHC 8.
 
 {--------------------------------------------------------------------
     Testing utilities
