@@ -39,7 +39,7 @@
 
 module ReificationRules.HOS
   ( EP,toE,constP,appP,lamP,letP,letPairP,ifP,bottomP,evalP,reifyP,reify, litE
-  , abst,repr,abst',repr', abstP,reprP
+  , abst,repr,abst',repr', abstP,reprP, unknownP
   , E, Prim
   , unI#
   , succI
@@ -196,6 +196,11 @@ reify _ = error "reify: not implemented"
 
 -- I added rules for 6 and 8, because they cost the same as 5.
 
+--     • No instance for (Circat.Circuit.GenBuses b)
+--         arising from a use of ‘UnknownP’
+
+-- "reify unknown" reifyP unknown = constP UnknownP
+
  #-}
 
 evalP :: forall a. EP a -> a
@@ -210,6 +215,9 @@ constP = constE'
 
 -- The NOINLINEs are just to reduce noise when examining Core output.
 -- Remove them later.
+
+unknownP :: CircuitUnknown a b => EP (a -> b)
+unknownP = constP UnknownP
 
 bottomP :: CircuitBot a => EP a
 bottomP = constP BottomP
