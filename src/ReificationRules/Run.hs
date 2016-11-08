@@ -81,7 +81,7 @@ goSep _ _ _ = error "goSep: not implemented"
  #-}
 
 genVerilog :: Bool
-genVerilog = False
+genVerilog = False -- True
 
 genPdf :: Bool
 genPdf = True
@@ -106,7 +106,9 @@ outGV :: String -> [Attr] -> UU -> IO ()
 outGV name attrs circ =
   do when showGraph $ putStrLn $ "outGV: Graph \n" ++ show g
      writeDot attrs g
-     when genPdf $ displayDot ("pdf","") name'
+     -- Cap the size so that LaTeX doesn't choke and PDF viewers allow more
+     -- zooming out.
+     when genPdf $ displayDot ("pdf","-Gsize=10,10") name'
      -- displayDot ("svg","") 
      -- displayDot ("png","-Gdpi=200")
      when genVerilog $ saveAsVerilog g

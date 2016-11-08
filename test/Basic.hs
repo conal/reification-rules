@@ -51,16 +51,22 @@ render = True -- False
 tests :: IO [Test]
 tests = return
   [ nopTest
-  , test 0.5 "not" not          -- works
-  , test 0.5 "fst" (fst :: (Int,Bool) -> Int)
-  , test 0.5 "if" (\ (a :: Int) -> if a > 0 then a else negate a)
-  , test 0.5 "or-not" (\ x y -> x || not y)
-  , test 0.5 "pow-6" (\ (a :: Double) -> (a + 1) ^ (6 :: Int))  -- product tree
-  , test 0.5 "pow-7" (\ (a :: Double) -> (a + 1) ^ (7 :: Int))
-  , test 0.5 "swap" (swap @Int @Bool)
-  , test 0.5 "map-just" (fmap not . Just)
-  , test 0.5 "nothing" (Nothing :: Maybe Bool)
-  , test 0.5 "undefined" (undefined :: ())
+--   , test 0.5 "foo-a" (\ x -> x * (-1) :: Double)
+  , test 0.5 "foo-b" (\ x y -> x - y * (-1) :: Double)
+  , test 0.5 "foo-c" (\ x y -> x - (-1) * y :: Double)
+  , test 0.5 "foo-d" (\ x y -> (-1) * y - x :: Double)
+  , test 0.5 "foo-e" (\ x y -> y * (-1) - x :: Double)
+  
+--   , test 0.5 "not" not          -- works
+--   , test 0.5 "fst" (fst :: (Int,Bool) -> Int)
+--   , test 0.5 "if" (\ (a :: Int) -> if a > 0 then a else negate a)
+--   , test 0.5 "or-not" (\ x y -> x || not y)
+--   , test 0.5 "pow-6" (\ (a :: Double) -> (a + 1) ^ (6 :: Int))  -- product tree
+--   , test 0.5 "pow-7" (\ (a :: Double) -> (a + 1) ^ (7 :: Int))
+--   , test 0.5 "swap" (swap @Int @Bool)
+--   , test 0.5 "map-just" (fmap not . Just)
+--   , test 0.5 "nothing" (Nothing :: Maybe Bool)
+--   , test 0.5 "undefined" (undefined :: ())
   -- , test 0.5 "min-int" (min :: Binop Int) -- fails
   ]
 

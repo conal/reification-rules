@@ -24,12 +24,12 @@
 ----------------------------------------------------------------------
 
 module ReificationRules.Prim
-  ( Lit(..), HasLit(..), litSS
+  ( Lit(..), HasLit(..)
   , Prim(..),litP -- ,xor,cond,ifThenElse
   -- , primArrow
   -- Convenient constraint aliases
-  , CircuitEq, CircuitOrd, CircuitBot, CircuitNum
-  , CircuitFloating, CircuitFractional, CircuitFromIntegral, CircuitIf
+  , CircuitEq, CircuitOrd, CircuitBot, CircuitNum, CircuitFloating, CircuitFractional
+  , CircuitFromIntegral, CircuitIf, CircuitUnknown
   ) where
 
 -- #define LitSources
@@ -46,7 +46,7 @@ import Circat.Circuit (GenBuses,(:>)
 #ifdef LitSources
                       , litUnit,litBool,litInt
 #else
-                      , constC
+                      , constC,GST
 #endif
                       )
 
@@ -95,36 +95,17 @@ instance HasLit Double where toLit = DoubleL
 
 -- Proofs
 
-litHasShow :: Lit a -> Dict (Show a)
-litHasShow (UnitL   _) = Dict
-litHasShow (BoolL   _) = Dict
-litHasShow (IntL    _) = Dict
-litHasShow (FloatL  _) = Dict
-litHasShow (DoubleL _) = Dict
+litGST :: Lit a -> Dict (GST a)
+litGST (UnitL   _) = Dict
+litGST (BoolL   _) = Dict
+litGST (IntL    _) = Dict
+litGST (FloatL  _) = Dict
+litGST (DoubleL _) = Dict
 
-#define LSh (litHasShow -> Dict)
-
--- instance Show (Lit a) where
---   showsPrec p UnitL     = showsPrec p ()
---   showsPrec p (BoolL b) = showsPrec p b
---   showsPrec p (IntL  b) = showsPrec p b
+#define LS (litGST -> Dict)
 
 instance Show (Lit a) where
-  showsPrec p l@LSh = showsPrec p (eval l)
-
-litGenBuses :: Lit a -> Dict (GenBuses a)
-litGenBuses (UnitL   _) = Dict
-litGenBuses (BoolL   _) = Dict
-litGenBuses (IntL    _) = Dict
-litGenBuses (FloatL  _) = Dict
-litGenBuses (DoubleL _) = Dict
-
-#define LSo (litGenBuses -> Dict)
-
-litSS :: Lit a -> Dict (Show a, GenBuses a)
-litSS l | (Dict,Dict) <- (litHasShow l,litGenBuses l) = Dict
-
-#define LS (litSS -> Dict)
+  showsPrec p l@LS = showsPrec p (eval l)
 
 instance Evalable Lit where
   eval (UnitL   x) = x
@@ -159,6 +140,7 @@ type CircuitFractional   = FractionalCat   (:>)
 type CircuitFloating     = FloatingCat     (:>)
 type CircuitFromIntegral = FromIntegralCat (:>)
 type CircuitIf           = IfCat           (:>)
+type CircuitUnknown      = UnknownCat      (:>)
 
 -- NOTE: When adding a constraint alias to the list above, be sure to export so
 -- reifyStdMeth can find it.
@@ -187,40 +169,42 @@ data Prim :: * -> * where
   ReprP            :: HasRep a => Prim (a -> Rep a)
   BottomP          :: BottomCat (:>) a => Prim a
   DelayP           :: (GenBuses s, Show s) => s -> Prim (s -> s)
+  UnknownP         :: CircuitUnknown a b => Prim (a -> b)
 
 instance Eq' (Prim a) (Prim b) where
-  LitP a  === LitP b  = a === b
-  NotP    === NotP    = True
-  AndP    === AndP    = True
-  OrP     === OrP     = True
-  XorP    === XorP    = True
-  NegateP === NegateP = True
-  AddP    === AddP    = True
-  SubP    === SubP    = True
-  MulP    === MulP    = True
-  PowIP   === PowIP   = True
-  RecipP  === RecipP  = True
-  DivideP === DivideP = True
-  ExpP    === ExpP    = True
-  FromIP  === FromIP  = True
-  CosP    === CosP    = True
-  SinP    === SinP    = True
-  EqP     === EqP     = True
-  NeP     === NeP     = True
-  LtP     === LtP     = True
-  GtP     === GtP     = True
-  LeP     === LeP     = True
-  GeP     === GeP     = True
-  ExlP    === ExlP    = True
-  ExrP    === ExrP    = True
-  InlP    === InlP    = True
-  InrP    === InrP    = True
-  PairP   === PairP   = True
-  IfP     === IfP     = True
-  AbstP   === AbstP   = True
-  ReprP   === ReprP   = True
-  BottomP === BottomP = True
-  _       === _       = False
+  LitP a  === LitP b    = a === b
+  NotP    === NotP      = True
+  AndP    === AndP      = True
+  OrP     === OrP       = True
+  XorP    === XorP      = True
+  NegateP === NegateP   = True
+  AddP    === AddP      = True
+  SubP    === SubP      = True
+  MulP    === MulP      = True
+  PowIP   === PowIP     = True
+  RecipP  === RecipP    = True
+  DivideP === DivideP   = True
+  ExpP    === ExpP      = True
+  FromIP  === FromIP    = True
+  CosP    === CosP      = True
+  SinP    === SinP      = True
+  EqP     === EqP       = True
+  NeP     === NeP       = True
+  LtP     === LtP       = True
+  GtP     === GtP       = True
+  LeP     === LeP       = True
+  GeP     === GeP       = True
+  ExlP    === ExlP      = True
+  ExrP    === ExrP      = True
+  InlP    === InlP      = True
+  InrP    === InrP      = True
+  PairP   === PairP     = True
+  IfP     === IfP       = True
+  AbstP   === AbstP     = True
+  ReprP   === ReprP     = True
+  BottomP === BottomP   = True
+  UnknownP === UnknownP = True
+  _       === _         = False
 
 instance Eq (Prim a) where (==) = (===)
 
@@ -256,6 +240,7 @@ instance Show (Prim a) where
   showsPrec _ AbstP         = showString "abst"
   showsPrec _ ReprP         = showString "repr"
   showsPrec _ BottomP       = showString "undefined"
+  showsPrec _ UnknownP      = showString "unknown"
   showsPrec p (DelayP a)    = showsApp1 "delay" p a
 
 instance Show' Prim where showsPrec' = showsPrec
@@ -293,6 +278,7 @@ primArrow IfP      = ifC
 primArrow AbstP    = abstC
 primArrow ReprP    = reprC
 primArrow BottomP  = error "primArrow: BottomP" -- bottomC?
+primArrow UnknownP = unknownC
 primArrow MealyP   = Mealy
 primArrow (LitP _) = error ("primArrow: LitP with function type?!")
 
@@ -331,6 +317,7 @@ instance -- (ClosedCat k, CoproductCat k, BoolCat k, NumCat k Int, RepCat k)
   unitArrow AbstP      = unitFun abstC
   unitArrow ReprP      = unitFun reprC
   unitArrow BottomP    = bottomC
+  unitArrow UnknownP   = unitFun unknownC
   unitArrow (DelayP a) = unitFun (delayC a)
   unitArrow (LitP l)   = unitArrow l
 
@@ -370,6 +357,7 @@ instance Evalable Prim where
   eval AbstP         = abstC
   eval ReprP         = reprC
   eval BottomP       = error "eval on BottomP"
+  eval UnknownP      = unknownC
   eval (DelayP a)    = delay a
 
 -- TODO: replace fst with exl, etc.
@@ -407,32 +395,33 @@ instance HasOpInfo Prim where
 
 
 instance Eq1' Prim where
-  LitP a  ==== LitP b  = a ==== b
-  NotP    ==== NotP    = True
-  AndP    ==== AndP    = True
-  OrP     ==== OrP     = True
-  XorP    ==== XorP    = True
-  NegateP ==== NegateP = True
-  AddP    ==== AddP    = True
-  SubP    ==== SubP    = True
-  MulP    ==== MulP    = True
-  PowIP   ==== PowIP   = True
-  EqP     ==== EqP     = True
-  NeP     ==== NeP     = True
-  LtP     ==== LtP     = True
-  GtP     ==== GtP     = True
-  LeP     ==== LeP     = True
-  GeP     ==== GeP     = True
-  ExlP    ==== ExlP    = True
-  ExrP    ==== ExrP    = True
-  InlP    ==== InlP    = True
-  InrP    ==== InrP    = True
-  PairP   ==== PairP   = True
-  IfP     ==== IfP     = True
-  AbstP   ==== AbstP   = True
-  ReprP   ==== ReprP   = True
-  BottomP ==== BottomP = True
-  _       ==== _       = False
+  LitP a   ==== LitP b   = a ==== b
+  NotP     ==== NotP     = True
+  AndP     ==== AndP     = True
+  OrP      ==== OrP      = True
+  XorP     ==== XorP     = True
+  NegateP  ==== NegateP  = True
+  AddP     ==== AddP     = True
+  SubP     ==== SubP     = True
+  MulP     ==== MulP     = True
+  PowIP    ==== PowIP    = True
+  EqP      ==== EqP      = True
+  NeP      ==== NeP      = True
+  LtP      ==== LtP      = True
+  GtP      ==== GtP      = True
+  LeP      ==== LeP      = True
+  GeP      ==== GeP      = True
+  ExlP     ==== ExlP     = True
+  ExrP     ==== ExrP     = True
+  InlP     ==== InlP     = True
+  InrP     ==== InrP     = True
+  PairP    ==== PairP    = True
+  IfP      ==== IfP      = True
+  AbstP    ==== AbstP    = True
+  ReprP    ==== ReprP    = True
+  BottomP  ==== BottomP  = True
+  UnknownP ==== UnknownP = True
+  _        ==== _        = False
 
 instance Eq1' Lit where
   UnitL x   ==== UnitL y   = x == y

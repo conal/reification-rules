@@ -83,10 +83,13 @@ data ReifyEnv = ReifyEnv { appV             :: Id
                          , unIV             :: Id
                          , idV              :: Id
                          , errorV           :: Id
+                         , unkV             :: Id
                          , composeV         :: Id
                          , prePostV         :: Id
                          , botPV            :: Id
                          , botCatTy         :: Type -> Type
+                         , unkPV            :: Id
+                         , unkCatTy         :: Type -> Type -> Type
                          , ifPV             :: Id
                          , ifCatTy          :: Type -> Type
                          , epTy             :: Type
@@ -292,6 +295,12 @@ reify (ReifyEnv {..}) guts dflags inScope =
      -- reify (eval e) --> e.
      Trying("eval")
      (collectArgs -> (Var v,[Type _,e])) | v == evalV -> Just e
+     Trying("unknown")
+     (collectArgs -> (Var v,[Type a,Type b]))
+       | v == unkV
+       , Just unkDict <- buildDictMaybe (unkCatTy a b)
+       -> -- TODO: maybe carry along error message
+          Just (varApps unkPV [] [Type a, Type b, unkDict])
      Trying("unfold")
      -- Only unfold applications if the arguments are non-reifiable, so we can
      -- use synthesized reify rules. TODO: reconsider our other uses of
@@ -519,6 +528,7 @@ reify (ReifyEnv {..}) guts dflags inScope =
 -- or is a constructor worker or wrapper.
 -- TODO: Rename this test. I think it's really about saying not to abstRepr.
 alreadyAbstReprd :: CoreExpr -> Bool
+-- alreadyAbstReprd e | pprTrace "alreadyAbstReprd" (ppr e) False = undefined
 alreadyAbstReprd (collectArgs -> (h,_)) =
   case h of
     Var  v   ->
@@ -528,8 +538,9 @@ alreadyAbstReprd (collectArgs -> (h,_)) =
       || isJust (isDataConId_maybe v)
      where
        name = uqVarName v
-    Case {} -> True
-    _       -> False
+    Case {}  -> True
+    Cast e _ -> alreadyAbstReprd e
+    _        -> False
 
 infixl 3 <+
 (<+) :: Binop (a -> Maybe b)
@@ -829,11 +840,13 @@ mkReifyEnv opts = do
   repr'V     <- findExpId "repr'"
   abstPV     <- findExpId "abstP"
   reprPV     <- findExpId "reprP"
+  unkPV      <- findExpId "unknownP"
   unIV       <- findExpId "unI#"
   idV        <- findBaseId "id"
   errorV     <- findBaseId "error"
   composeV   <- findBaseId "."
   prePostV   <- findMiscId "-->"
+  unkV       <- findMiscId "unknown"
   primMap    <- mapM findMonoId stdMethMap
 --   let RuleInfo rules _ = ruleInfo (idInfo reifyV) in
 --     do drace "reify install: reifyP rule info" (ppr rules) (return ())
@@ -858,12 +871,14 @@ mkReifyEnv opts = do
   circuitTc  <- findTc "Circat.Circuit" ":>"
   ifCatTc    <- findTc "Circat.Classes" "IfCat"
   botCatTc   <- findTc "Circat.Classes" "BottomCat"
+  unkCatTc   <- findTc "Circat.Classes" "UnknownCat"
   epTc       <- findTc "ReificationRules.HOS" "EP"
   let epTy       = mkTyConApp epTc []
       circuitTy  = mkTyConApp circuitTc []
       catTy tc t = mkTyConApp tc [circuitTy,t]
       ifCatTy    = catTy ifCatTc
       botCatTy   = catTy botCatTc
+      unkCatTy a b = mkTyConApp unkCatTc [circuitTy,a,b]
       
       -- New ones
       idAt t = Var idV `App` Type t     -- varApps idV [t] []
