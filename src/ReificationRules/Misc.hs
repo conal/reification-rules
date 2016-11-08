@@ -23,6 +23,7 @@ module ReificationRules.Misc
   , Eq1'(..), (===?)
   , PrimBasics(..), Evalable(..)
 --   , ifThenElse
+  , unknown
   ) where
 
 import Unsafe.Coerce (unsafeCoerce)     -- see below
@@ -74,3 +75,8 @@ class PrimBasics p where
   pairP :: p (a :=> b :=> a :* b)
 
 class Evalable p where eval :: p a -> a
+
+-- | Fill-in for unknown functionality
+unknown :: a -> b
+unknown _ = error "unknown: not implemented"
+{-# NOINLINE unknown #-}
